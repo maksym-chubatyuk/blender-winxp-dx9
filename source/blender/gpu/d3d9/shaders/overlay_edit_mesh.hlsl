@@ -206,7 +206,13 @@ VertOut vert(VertIn v)
                    uniform_buf__98.x);
 #endif
 
+#if defined(VERT) || defined(FACEDOT)
+  /* Sprites have the depth of their center for all their pixels: on faces seen at grazing angles
+   * the surface around the vertex is closer than the offset of the GLSL. */
+  clip_pos.z -= ndc_offset_factor * ndc_offset * 4.0;
+#else
   clip_pos.z -= ndc_offset_factor * ndc_offset;
+#endif
   o.position = gpu_position(clip_pos);
   o.color = saturate(color);
 #ifdef EDGE

@@ -6244,6 +6244,18 @@ static void rna_def_userdef_system(BlenderRNA *brna)
   RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
   RNA_def_property_update(prop, 0, "rna_userdef_update");
 
+  prop = RNA_def_property(srna, "viewport_resolution_scale", PROP_FLOAT, PROP_FACTOR);
+  RNA_def_property_float_sdna(prop, nullptr, "viewport_resolution_scale");
+  RNA_def_property_range(prop, 0.25f, 1.0f);
+  RNA_def_property_ui_range(prop, 0.25f, 1.0f, 5, 2);
+  RNA_def_property_ui_text(prop,
+                           "Resolution Scale",
+                           "Resolution of the 3D viewport rendering relative to the screen, lower "
+                           "values are faster on GPUs limited by their fill rate (the text and "
+                           "gizmos keep the full resolution)");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_update(prop, 0, "rna_userdef_update");
+
   prop = RNA_def_property(srna, "solid_lights", PROP_COLLECTION, PROP_NONE);
   RNA_def_property_collection_sdna(prop, nullptr, "light_param", "");
   RNA_def_property_struct_type(prop, "UserSolidLight");

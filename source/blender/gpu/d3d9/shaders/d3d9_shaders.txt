@@ -80,3 +80,4 @@ overlay_depth_mesh_conservative_selectable     overlay_depth_mesh.hlsl SELECT
 select_id_flat                                 select_id.hlsl
 select_id_uniform                              select_id.hlsl UNIFORM_ID
 overlay_background_simple                      overlay_background.hlsl SIMPLE
+gpu_shader_keyframe_shape                      gpu_shader_keyframe_shape.hlsl

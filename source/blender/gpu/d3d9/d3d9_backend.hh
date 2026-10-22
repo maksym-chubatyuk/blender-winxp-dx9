@@ -37,6 +37,9 @@ class D3D9Backend : public GPUBackend {
   /** Called once per frame: ages and trims the cache. */
   void texture_cache_frame();
 
+  /** Corners of the point quads (see #D3D9Shader::point_quads): float2, 6 per point, repeated. */
+  IDirect3DVertexBuffer9 *point_corner_buffer();
+
   /** Optional features, see #capabilities_init. */
   bool supports_separate_alpha_blend = false;
   /** Blending with several render targets bound (not on R300 class hardware). */
@@ -120,6 +123,7 @@ class D3D9Backend : public GPUBackend {
     D3DFORMAT format;
     uint64_t frame;
   };
+  IDirect3DVertexBuffer9 *point_corner_buffer_ = nullptr;
   Vector<CachedTexture> texture_cache_;
   uint64_t texture_cache_frame_ = 0;
 

@@ -1088,7 +1088,8 @@ struct UserDef {
   DNA_DEPRECATED float gpu_viewport_quality = 0;
   short gp_manhattandist = 1, gp_euclideandist = 2, gp_eraser = 25;
   eGP_UserdefSettings gp_settings = {};
-  char _pad13[4] = {};
+  /** Resolution of the 3D viewport render relative to the region, 0 (old files) is full. */
+  float viewport_resolution_scale = 1.0f;
   struct SolidLight light_param[4];
   float light_ambient[3] = {};
   eUserpref_Gizmo_Flag gizmo_flag = USER_GIZMO_DRAW;

@@ -177,8 +177,8 @@ DRWContext::DRWContext(Mode mode_,
                        View3D *v3d)
     : DRWContext(mode_,
                  depsgraph,
-                 int2(GPU_texture_width(GPU_viewport_color_texture(viewport, 0)),
-                      GPU_texture_height(GPU_viewport_color_texture(viewport, 0))),
+                 int2(GPU_texture_width(GPU_viewport_render_color_texture(viewport, 0)),
+                      GPU_texture_height(GPU_viewport_render_color_texture(viewport, 0))),
                  C,
                  region,
                  v3d)
@@ -1325,7 +1325,11 @@ static void drw_callbacks_post_scene_view3d(DRWContext &draw_ctx)
 
   DefaultFramebufferList *dfbl = DRW_context_get()->viewport_framebuffer_list_get();
 
-  GPU_framebuffer_bind(dfbl->overlay_fb);
+  /* With a reduced render resolution, the rest is drawn at the region resolution. */
+  gpu::FrameBuffer *display_fb = draw_ctx.viewport ?
+                                     GPU_viewport_render_upscale(draw_ctx.viewport) :
+                                     nullptr;
+  GPU_framebuffer_bind(display_fb ? display_fb : dfbl->overlay_fb);
 
   GPU_matrix_projection_set(rv3d->winmat);
   GPU_matrix_set(rv3d->viewmat);

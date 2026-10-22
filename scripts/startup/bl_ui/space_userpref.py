@@ -952,6 +952,7 @@ class USERPREF_PT_viewport_quality(ViewportPanel, CenterAlignMixIn, Panel):
 
         col = layout.column()
         col.prop(system, "viewport_aa")
+        col.prop(system, "viewport_resolution_scale")
 
         col = layout.column(heading="Smooth Wires")
         col.prop(system, "use_overlay_smooth_wire", text="Overlay")

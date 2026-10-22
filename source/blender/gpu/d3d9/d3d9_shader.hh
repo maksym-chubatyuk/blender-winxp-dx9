@@ -152,6 +152,15 @@ class D3D9Shader : public Shader {
   {
     return flat_color_;
   }
+  /**
+   * Points are drawn as quads of 2 triangles, the vertex shader offsets the corners by the point
+   * size (input `TEXCOORD14`, see #D3D9_POINT_CORNER_ATTR): unlike sprites, all the outputs keep
+   * their precision. Immediate mode only.
+   */
+  bool point_quads() const
+  {
+    return point_quads_;
+  }
   /** The fragments write the select id instead of colors (see #D3D9Context::select_draw_begin). */
   bool select_output() const
   {
@@ -238,6 +247,7 @@ class D3D9Shader : public Shader {
   Vector<VertexPull> vertex_pulls_;
   bool select_output_ = false;
   bool flat_color_ = false;
+  bool point_quads_ = false;
   int resource_id_stride_ = 1;
 
   /** CPU copy of the constant registers and the dirty register ranges. */

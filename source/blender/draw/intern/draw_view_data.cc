@@ -45,8 +45,8 @@ void DRW_view_data_default_lists_from_viewport(DRWViewData *view_data, GPUViewpo
   DefaultTextureList *dtxl = &view_data->dtxl;
   /* Depth texture is shared between both stereo views. */
   dtxl->depth = GPU_viewport_depth_texture(viewport);
-  dtxl->color = GPU_viewport_color_texture(viewport, active_view);
-  dtxl->color_overlay = GPU_viewport_overlay_texture(viewport, active_view);
+  dtxl->color = GPU_viewport_render_color_texture(viewport, active_view);
+  dtxl->color_overlay = GPU_viewport_render_overlay_texture(viewport, active_view);
 
   GPU_framebuffer_ensure_config(&dfbl->default_fb,
                                 {

@@ -269,8 +269,37 @@ void D3D9Backend::texture_cache_frame()
   }
 }
 
+IDirect3DVertexBuffer9 *D3D9Backend::point_corner_buffer()
+{
+  if (point_corner_buffer_ == nullptr) {
+    /* Enough for the immediate mode buffer with the smallest vertex size. */
+    const uint corners_len = D3D9_IMM_BUFFER_SIZE / 8;
+    if (!D3D9_CHECK(device->CreateVertexBuffer(corners_len * sizeof(float[2]),
+                                               D3DUSAGE_WRITEONLY,
+                                               0,
+                                               D3DPOOL_MANAGED,
+                                               &point_corner_buffer_,
+                                               nullptr)))
+    {
+      point_corner_buffer_ = nullptr;
+      return nullptr;
+    }
+    float(*corners)[2];
+    if (SUCCEEDED(point_corner_buffer_->Lock(0, 0, reinterpret_cast<void **>(&corners), 0))) {
+      const float pattern[6][2] = {{-1, -1}, {1, -1}, {1, 1}, {-1, -1}, {1, 1}, {-1, 1}};
+      for (uint i = 0; i < corners_len; i++) {
+        corners[i][0] = pattern[i % 6][0];
+        corners[i][1] = pattern[i % 6][1];
+      }
+      point_corner_buffer_->Unlock();
+    }
+  }
+  return point_corner_buffer_;
+}
+
 void D3D9Backend::delete_resources()
 {
+  d3d9_release(point_corner_buffer_);
   for (CachedTexture &cached : texture_cache_) {
     cached.texture->Release();
   }

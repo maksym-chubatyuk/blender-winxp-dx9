@@ -1044,6 +1044,15 @@ static void wm_draw_area_offscreen(bContext *C, wmWindow *win, ScrArea *area, bo
       wm_draw_region_stereo_set(bmain, area, &region, STEREO_LEFT_ID);
       Scene *scene = WM_window_get_active_scene(win);
       wm_draw_region_buffer_create(scene, &region, false, use_viewport);
+      if (use_viewport) {
+        /* The 3D viewport can render at a reduced resolution (fill rate limited GPUs). */
+        const bool is_view3d = area->spacetype == SPACE_VIEW3D &&
+                               region.regiontype == RGN_TYPE_WINDOW;
+        const float scale = U.viewport_resolution_scale > 0.0f ? U.viewport_resolution_scale :
+                                                                 1.0f;
+        GPU_viewport_render_scale_set(region.runtime->draw_buffer->viewport,
+                                      is_view3d ? scale : 1.0f);
+      }
       wm_draw_region_bind(&region, 0);
       ED_region_do_draw(C, &region);
       wm_draw_region_unbind(&region);

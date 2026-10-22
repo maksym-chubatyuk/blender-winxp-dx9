@@ -27,6 +27,11 @@ class FrameBuffer;
 
 GPUViewport *GPU_viewport_create();
 GPUViewport *GPU_viewport_stereo_create();
+/**
+ * Render the engines at a fraction of the region resolution (1 for full resolution), see
+ * #GPU_viewport_render_upscale. Not supported by stereo viewports.
+ */
+void GPU_viewport_render_scale_set(GPUViewport *viewport, float scale);
 void GPU_viewport_bind(GPUViewport *viewport, int view, const rcti *rect);
 void GPU_viewport_unbind(GPUViewport *viewport);
 /**
@@ -86,6 +91,15 @@ bool GPU_viewport_is_stereo_get(GPUViewport *viewport);
 gpu::Texture *GPU_viewport_color_texture(GPUViewport *viewport, int view);
 gpu::Texture *GPU_viewport_overlay_texture(GPUViewport *viewport, int view);
 gpu::Texture *GPU_viewport_depth_texture(GPUViewport *viewport);
+/** Textures the engines render to, at the render resolution (#GPU_viewport_render_scale_set). */
+gpu::Texture *GPU_viewport_render_color_texture(GPUViewport *viewport, int view);
+gpu::Texture *GPU_viewport_render_overlay_texture(GPUViewport *viewport, int view);
+/**
+ * With a reduced render resolution: copy the render of the engines to the display textures
+ * (linear filtering) and return the display overlay frame-buffer (depth cleared) to draw on top at
+ * the region resolution. Returns null without scaling.
+ */
+gpu::FrameBuffer *GPU_viewport_render_upscale(GPUViewport *viewport);
 
 /**
  * Color render and overlay frame-buffers for drawing outside of DRW module.

@@ -115,6 +115,12 @@ GHOST_ContextD3D9::GHOST_ContextD3D9(const GHOST_ContextParams &context_params, 
 
 GHOST_ContextD3D9::~GHOST_ContextD3D9()
 {
+  for (IDirect3DQuery9 *&query : frame_queries_) {
+    if (query) {
+      query->Release();
+      query = nullptr;
+    }
+  }
   swap_chain_free();
   if (has_device_) {
     device_release();
@@ -207,6 +213,26 @@ GHOST_TSuccess GHOST_ContextD3D9::swapBufferRelease()
     QueryPerformanceCounter(&t0);
   }
   const HRESULT hr = swap_chain_->Present(nullptr, nullptr, nullptr, nullptr, 0);
+
+  /* Allow one frame in flight: drivers queue up to 3 frames, with slow GPUs the input latency is
+   * then several frames long. Wait for the previous frame to be done on the GPU. */
+  if (g_device) {
+    IDirect3DQuery9 *&query = frame_queries_[frame_query_index_];
+    if (query == nullptr) {
+      g_device->CreateQuery(D3DQUERYTYPE_EVENT, &query);
+    }
+    if (query) {
+      query->Issue(D3DISSUE_END);
+    }
+    frame_query_index_ ^= 1;
+    IDirect3DQuery9 *previous = frame_queries_[frame_query_index_];
+    if (previous) {
+      while (previous->GetData(nullptr, 0, D3DGETDATA_FLUSH) == S_FALSE) {
+        Sleep(1);
+      }
+    }
+  }
+
   if (frametime) {
     static LARGE_INTEGER freq = {}, last = {};
     static double present_sum = 0.0, interval_sum = 0.0;

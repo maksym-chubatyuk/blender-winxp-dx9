@@ -10,7 +10,9 @@
 
 #include <cstring>
 
+#include "BLI_math_base.h"
 #include "BLI_math_vector.h"
+#include "BLI_math_vector.hh"
 #include "BLI_math_vector_types.hh"
 #include "BLI_rect.h"
 
@@ -56,6 +58,20 @@ static struct {
 struct GPUViewport {
   int2 size = int2(0);
   int flag = 0;
+
+  /**
+   * Resolution of the render relative to the region (#GPU_viewport_render_scale_set). Below 1, the
+   * engines render to the textures above at the reduced size, #GPU_viewport_render_upscale copies
+   * them to the display textures at the region size, used for the drawing after the engines
+   * (gizmos, text) and to draw on screen.
+   */
+  float render_scale = 1.0f;
+  int2 display_size = int2(0);
+  gpu::Texture *display_color_tx = nullptr;
+  gpu::Texture *display_overlay_tx = nullptr;
+  gpu::Texture *display_depth_tx = nullptr;
+  gpu::FrameBuffer *display_color_fb = nullptr;
+  gpu::FrameBuffer *display_overlay_fb = nullptr;
 
   /* Set the active view (for stereoscopic viewport rendering). */
   int active_view = 0;
@@ -190,6 +206,28 @@ static void gpu_viewport_textures_create(GPUViewport *viewport)
     GPU_texture_clear(viewport->depth_tx, GPU_DATA_FLOAT, &depth_clear);
   }
 
+  if (viewport->display_size != viewport->size && viewport->display_color_tx == nullptr) {
+    const int2 &display_size = viewport->display_size;
+    viewport->display_color_tx = GPU_texture_create_2d("viewport_display_color",
+                                                       UNPACK2(display_size),
+                                                       1,
+                                                       viewport_color_format(),
+                                                       usage,
+                                                       nullptr);
+    viewport->display_overlay_tx = GPU_texture_create_2d("viewport_display_overlay",
+                                                         UNPACK2(display_size),
+                                                         1,
+                                                         gpu::TextureFormat::SRGBA_8_8_8_8,
+                                                         usage,
+                                                         nullptr);
+    viewport->display_depth_tx = GPU_texture_create_2d("viewport_display_depth",
+                                                       UNPACK2(display_size),
+                                                       1,
+                                                       gpu::TextureFormat::SFLOAT_32_DEPTH_UINT_8,
+                                                       usage,
+                                                       nullptr);
+  }
+
   if (!viewport->depth_tx || !viewport->color_render_tx[0] || !viewport->color_overlay_tx[0]) {
     GPU_viewport_free(viewport);
   }
@@ -197,6 +235,11 @@ static void gpu_viewport_textures_create(GPUViewport *viewport)
 
 static void gpu_viewport_textures_free(GPUViewport *viewport)
 {
+  GPU_FRAMEBUFFER_FREE_SAFE(viewport->display_color_fb);
+  GPU_FRAMEBUFFER_FREE_SAFE(viewport->display_overlay_fb);
+  GPU_TEXTURE_FREE_SAFE(viewport->display_color_tx);
+  GPU_TEXTURE_FREE_SAFE(viewport->display_overlay_tx);
+  GPU_TEXTURE_FREE_SAFE(viewport->display_depth_tx);
   GPU_FRAMEBUFFER_FREE_SAFE(viewport->stereo_comp_fb);
   GPU_FRAMEBUFFER_FREE_SAFE(viewport->render_fb);
   GPU_FRAMEBUFFER_FREE_SAFE(viewport->overlay_fb);
@@ -209,17 +252,29 @@ static void gpu_viewport_textures_free(GPUViewport *viewport)
   GPU_TEXTURE_FREE_SAFE(viewport->depth_tx);
 }
 
+void GPU_viewport_render_scale_set(GPUViewport *viewport, float scale)
+{
+  /* Stereo viewports aren't supported. */
+  viewport->render_scale = (viewport->flag & GPU_VIEWPORT_STEREO) ? 1.0f :
+                                                                    clamp_f(scale, 0.1f, 1.0f);
+}
+
 void GPU_viewport_bind(GPUViewport *viewport, int view, const rcti *rect)
 {
   int2 rect_size;
   /* add one pixel because of scissor test */
   rect_size[0] = BLI_rcti_size_x(rect) + 1;
   rect_size[1] = BLI_rcti_size_y(rect) + 1;
+  int2 render_size = rect_size;
+  if (viewport->render_scale < 1.0f) {
+    render_size = math::max(int2(float2(rect_size) * viewport->render_scale + 0.5f), int2(1));
+  }
 
   DRW_gpu_context_enable();
 
-  if (viewport->size != rect_size) {
-    copy_v2_v2_int(viewport->size, rect_size);
+  if (viewport->size != render_size || viewport->display_size != rect_size) {
+    copy_v2_v2_int(viewport->size, render_size);
+    viewport->display_size = rect_size;
     gpu_viewport_textures_free(viewport);
     gpu_viewport_textures_create(viewport);
   }
@@ -448,8 +503,8 @@ static void gpu_viewport_draw_colormanaged(GPUViewport *viewport,
                                            bool display_colorspace,
                                            bool do_overlay_merge)
 {
-  gpu::Texture *color = viewport->color_render_tx[view];
-  gpu::Texture *color_overlay = viewport->color_overlay_tx[view];
+  gpu::Texture *color = GPU_viewport_color_texture(viewport, view);
+  gpu::Texture *color_overlay = GPU_viewport_overlay_texture(viewport, view);
 
   bool use_ocio = false;
 
@@ -498,7 +553,7 @@ void GPU_viewport_draw_to_screen_ex(GPUViewport *viewport,
                                     bool display_colorspace,
                                     bool do_overlay_merge)
 {
-  gpu::Texture *color = viewport->color_render_tx[view];
+  gpu::Texture *color = GPU_viewport_color_texture(viewport, view);
 
   if (color == nullptr) {
     return;
@@ -599,12 +654,82 @@ bool GPU_viewport_is_stereo_get(GPUViewport *viewport)
 
 gpu::Texture *GPU_viewport_color_texture(GPUViewport *viewport, int view)
 {
-  return viewport->color_render_tx[view];
+  return viewport->display_color_tx ? viewport->display_color_tx : viewport->color_render_tx[view];
 }
 
 gpu::Texture *GPU_viewport_overlay_texture(GPUViewport *viewport, int view)
 {
+  return viewport->display_overlay_tx ? viewport->display_overlay_tx :
+                                        viewport->color_overlay_tx[view];
+}
+
+gpu::Texture *GPU_viewport_render_color_texture(GPUViewport *viewport, int view)
+{
+  return viewport->color_render_tx[view];
+}
+
+gpu::Texture *GPU_viewport_render_overlay_texture(GPUViewport *viewport, int view)
+{
   return viewport->color_overlay_tx[view];
+}
+
+static void gpu_viewport_upscale_texture(gpu::Texture *src, gpu::FrameBuffer *dst_fb)
+{
+  GPU_framebuffer_bind(dst_fb);
+  GPU_matrix_push();
+  GPU_matrix_push_projection();
+  GPU_matrix_identity_set();
+  GPU_matrix_identity_projection_set();
+  GPU_blend(GPU_BLEND_NONE);
+  GPU_depth_test(GPU_DEPTH_NONE);
+
+  GPUVertFormat *format = immVertexFormat();
+  const uint pos = GPU_vertformat_attr_add(format, "pos", gpu::VertAttrType::SFLOAT_32_32_32);
+  const uint tex_coord = GPU_vertformat_attr_add(
+      format, "texCoord", gpu::VertAttrType::SFLOAT_32_32);
+  immBindBuiltinProgram(GPU_SHADER_3D_IMAGE);
+  GPUSamplerState sampler = GPUSamplerState::default_sampler();
+  sampler.filtering = GPU_SAMPLER_FILTERING_LINEAR;
+  GPU_texture_bind_ex(src, sampler, 0);
+  immBegin(GPU_PRIM_TRI_STRIP, 4);
+  immAttr2f(tex_coord, 0.0f, 0.0f);
+  immVertex3f(pos, -1.0f, -1.0f, 0.0f);
+  immAttr2f(tex_coord, 1.0f, 0.0f);
+  immVertex3f(pos, 1.0f, -1.0f, 0.0f);
+  immAttr2f(tex_coord, 0.0f, 1.0f);
+  immVertex3f(pos, -1.0f, 1.0f, 0.0f);
+  immAttr2f(tex_coord, 1.0f, 1.0f);
+  immVertex3f(pos, 1.0f, 1.0f, 0.0f);
+  immEnd();
+  immUnbindProgram();
+  GPU_texture_unbind(src);
+
+  GPU_matrix_pop_projection();
+  GPU_matrix_pop();
+}
+
+gpu::FrameBuffer *GPU_viewport_render_upscale(GPUViewport *viewport)
+{
+  if (viewport->display_color_tx == nullptr) {
+    return nullptr;
+  }
+  GPU_framebuffer_ensure_config(&viewport->display_color_fb,
+                                {
+                                    GPU_ATTACHMENT_NONE,
+                                    GPU_ATTACHMENT_TEXTURE(viewport->display_color_tx),
+                                });
+  GPU_framebuffer_ensure_config(&viewport->display_overlay_fb,
+                                {
+                                    GPU_ATTACHMENT_TEXTURE(viewport->display_depth_tx),
+                                    GPU_ATTACHMENT_TEXTURE(viewport->display_overlay_tx),
+                                });
+  gpu_viewport_upscale_texture(viewport->color_render_tx[viewport->active_view],
+                               viewport->display_color_fb);
+  gpu_viewport_upscale_texture(viewport->color_overlay_tx[viewport->active_view],
+                               viewport->display_overlay_fb);
+  /* The depth isn't scaled: the drawing after the engines isn't occluded by the scene. */
+  GPU_framebuffer_clear_depth(viewport->display_overlay_fb, 1.0f);
+  return viewport->display_overlay_fb;
 }
 
 gpu::Texture *GPU_viewport_depth_texture(GPUViewport *viewport)

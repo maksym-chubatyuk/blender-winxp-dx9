@@ -23,7 +23,6 @@
 namespace blender::gpu {
 
 /** Size of the streaming vertex buffer. */
-static constexpr uint IMM_BUFFER_SIZE = 2 * 1024 * 1024;
 
 D3D9Immediate::~D3D9Immediate()
 {
@@ -66,9 +65,13 @@ void D3D9Immediate::end()
     vert_len++;
     draw_prim = GPU_PRIM_LINE_STRIP;
   }
+  /* Points drawn as quads: every vertex is repeated for the 6 corners of its 2 triangles. */
+  const bool point_quads = draw_prim == GPU_PRIM_POINTS && d3d9_shader->point_quads();
+  const uint repeat = point_quads ? 6 : 1;
   D3DPRIMITIVETYPE type;
   uint prim_len;
-  if (!d3d9_primitive(draw_prim, vert_len, type, prim_len)) {
+  if (!d3d9_primitive(point_quads ? GPU_PRIM_TRIS : draw_prim, vert_len * repeat, type, prim_len))
+  {
     return;
   }
   ctx->point_sprite_set(type == D3DPT_POINTLIST && d3d9_shader->point_sprite());
@@ -76,14 +79,14 @@ void D3D9Immediate::end()
 
   D3D9VertexLayout layout;
   layout.init(vertex_format);
-  const uint size = layout.stride * vert_len;
-  if (size > IMM_BUFFER_SIZE) {
+  const uint size = layout.stride * vert_len * repeat;
+  if (size > D3D9_IMM_BUFFER_SIZE) {
     return;
   }
 
   /* Stream the vertices: append to the buffer, start over when full. */
   if (vbo_ == nullptr) {
-    if (!D3D9_CHECK(device->CreateVertexBuffer(IMM_BUFFER_SIZE,
+    if (!D3D9_CHECK(device->CreateVertexBuffer(D3D9_IMM_BUFFER_SIZE,
                                                D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY,
                                                0,
                                                D3DPOOL_DEFAULT,
@@ -92,12 +95,14 @@ void D3D9Immediate::end()
     {
       return;
     }
-    offset_ = IMM_BUFFER_SIZE;
+    offset_ = D3D9_IMM_BUFFER_SIZE;
   }
-  /* Vertices are addressed with the start vertex: align to the stride. */
-  uint offset = ((offset_ + layout.stride - 1) / layout.stride) * layout.stride;
+  /* Vertices are addressed with the start vertex: align to the stride (and to the 6 corners of
+   * the point quads, the corner stream uses the same start vertex). */
+  const uint align = layout.stride * repeat;
+  uint offset = ((offset_ + align - 1) / align) * align;
   DWORD lock_flags = D3DLOCK_NOOVERWRITE;
-  if (offset + size > IMM_BUFFER_SIZE) {
+  if (offset + size > D3D9_IMM_BUFFER_SIZE) {
     offset = 0;
     lock_flags = D3DLOCK_DISCARD;
   }
@@ -105,7 +110,19 @@ void D3D9Immediate::end()
   if (FAILED(vbo_->Lock(offset, size, &dst, lock_flags))) {
     return;
   }
-  layout.convert(vertex_format, host_data_.data(), dst, vert_len);
+  if (point_quads) {
+    Vector<uint8_t> converted(layout.stride * vert_len);
+    layout.convert(vertex_format, host_data_.data(), converted.data(), vert_len);
+    uint8_t *out = static_cast<uint8_t *>(dst);
+    for (uint v = 0; v < vert_len; v++) {
+      for (uint corner = 0; corner < 6; corner++, out += layout.stride) {
+        memcpy(out, converted.data() + v * layout.stride, layout.stride);
+      }
+    }
+  }
+  else {
+    layout.convert(vertex_format, host_data_.data(), dst, vert_len);
+  }
   vbo_->Unlock();
   offset_ = offset + size;
 
@@ -146,7 +163,19 @@ void D3D9Immediate::end()
     device->SetStreamSource(stream, D3D9Backend::get()->vertex_id_buffer(), 0, sizeof(float));
     stream++;
   }
-  const uint16_t missing = inputs & ~bound & ~(1 << D3D9_VERTEX_ID_ATTR);
+  if (point_quads) {
+    key.elements.append({WORD(stream),
+                         0,
+                         D3DDECLTYPE_FLOAT2,
+                         D3DDECLMETHOD_DEFAULT,
+                         D3DDECLUSAGE_TEXCOORD,
+                         BYTE(D3D9_POINT_CORNER_ATTR)});
+    device->SetStreamSource(
+        stream, D3D9Backend::get()->point_corner_buffer(), 0, sizeof(float[2]));
+    stream++;
+  }
+  const uint16_t missing = inputs & ~bound & ~(1 << D3D9_VERTEX_ID_ATTR) &
+                           ~(1 << D3D9_POINT_CORNER_ATTR);
   if (missing) {
     for (int loc = 0; loc < 16; loc++) {
       if (missing & (1 << loc)) {

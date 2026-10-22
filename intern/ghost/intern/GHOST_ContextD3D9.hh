@@ -51,6 +51,9 @@ class GHOST_ContextD3D9 : public GHOST_Context {
 
   HWND hwnd_;
   IDirect3DSwapChain9 *swap_chain_ = nullptr;
+  /** Events issued after the presents, to limit the frames queued in the driver (latency). */
+  IDirect3DQuery9 *frame_queries_[2] = {nullptr, nullptr};
+  int frame_query_index_ = 0;
   IDirect3DSurface9 *back_buffer_ = nullptr;
   int width_ = 0;
   int height_ = 0;

@@ -33,6 +33,10 @@ namespace blender::gpu {
 
 /** Vertex shader input usage index reserved for the vertex index. */
 constexpr int D3D9_VERTEX_ID_ATTR = 15;
+/** Corner of the quads of points drawn as quads (`d3d9-point-quads`), -1 or 1 per axis. */
+constexpr int D3D9_POINT_CORNER_ATTR = 14;
+/** Size of the dynamic vertex buffer of the immediate mode. */
+constexpr uint D3D9_IMM_BUFFER_SIZE = 2 * 1024 * 1024;
 /** Number of reserved vertex shader constant registers. */
 constexpr int D3D9_RESERVED_VS_CONSTANTS = 2;
 /** Size of the static vertex index stream. */
