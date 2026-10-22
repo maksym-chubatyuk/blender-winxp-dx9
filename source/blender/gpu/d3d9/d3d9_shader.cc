@@ -454,6 +454,10 @@ void D3D9Shader::parse_instance_data(const D3D9ShaderBinary &binary)
     if (sscanf(annotation.c_str(), "%31s", key) != 1) {
       continue;
     }
+    if (STREQ(key, "vertex-pull")) {
+      sscanf(annotation.c_str(), "%*s %d %d", &vertex_pull_slot_, &vertex_pull_stride_);
+      continue;
+    }
     if (STREQ(key, "point-sprite")) {
       point_sprite_ = true;
       continue;

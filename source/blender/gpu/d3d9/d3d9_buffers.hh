@@ -73,9 +73,16 @@ class D3D9StorageBuf : public StorageBuf {
     return host_data_.size();
   }
 
+  /** The data as a vertex buffer, for shaders reading their vertices from the buffer
+   * (`d3d9-vertex-pull` annotation). Uploaded again after each change. */
+  IDirect3DVertexBuffer9 *vertex_buffer_get();
+
  private:
   Vector<uint8_t> host_data_;
   int slot_ = -1;
+  IDirect3DVertexBuffer9 *vbo_ = nullptr;
+  size_t vbo_size_ = 0;
+  bool vbo_dirty_ = true;
 };
 
 class D3D9QueryPool : public QueryPool {

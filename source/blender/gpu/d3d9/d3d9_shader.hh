@@ -131,6 +131,16 @@ class D3D9Shader : public Shader {
   {
     return point_sprite_;
   }
+  /** Storage buffer slot the vertices are read from (`d3d9-vertex-pull`), -1 if none. Its float4
+   * columns are bound to the inputs `TEXCOORD0` and up. */
+  int vertex_pull_slot() const
+  {
+    return vertex_pull_slot_;
+  }
+  int vertex_pull_stride() const
+  {
+    return vertex_pull_stride_;
+  }
   bool has_instance_data() const
   {
     return !instance_data_.is_empty();
@@ -209,6 +219,8 @@ class D3D9Shader : public Shader {
   /** Storage buffer slot of the resource ids, and number of words per instance. */
   int resource_id_slot_ = -1;
   bool point_sprite_ = false;
+  int vertex_pull_slot_ = -1;
+  int vertex_pull_stride_ = 0;
   int resource_id_stride_ = 1;
 
   /** CPU copy of the constant registers and the dirty register ranges. */

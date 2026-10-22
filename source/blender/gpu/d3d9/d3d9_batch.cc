@@ -113,6 +113,30 @@ bool D3D9Batch::bind_vertex_streams(D3D9Shader *shader)
     }
   }
 
+  if (shader->vertex_pull_slot() >= 0 && shader->vertex_pull_slot() < D3D9_MAX_SSBO_SLOTS) {
+    /* Vertices read from a storage buffer: bind it as a vertex stream of float4 columns. */
+    D3D9StorageBuf *ssbo = ctx->bound_ssbos[shader->vertex_pull_slot()];
+    IDirect3DVertexBuffer9 *buffer = ssbo ? ssbo->vertex_buffer_get() : nullptr;
+    const int stride = shader->vertex_pull_stride();
+    if (buffer == nullptr || stride <= 0) {
+      return false;
+    }
+    for (int column = 0; column < stride / 16; column++) {
+      if (!(inputs & (1 << column)) || (bound & (1 << column))) {
+        continue;
+      }
+      key.elements.append({WORD(stream),
+                           WORD(column * 16),
+                           D3DDECLTYPE_FLOAT4,
+                           D3DDECLMETHOD_DEFAULT,
+                           D3DDECLUSAGE_TEXCOORD,
+                           BYTE(column)});
+      bound |= 1 << column;
+    }
+    device->SetStreamSource(stream, buffer, 0, UINT(stride));
+    stream++;
+  }
+
   if (shader->uses_vertex_id()) {
     key.elements.append({WORD(stream),
                          0,

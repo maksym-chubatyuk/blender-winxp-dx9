@@ -57,3 +57,9 @@ overlay_edit_mesh_edge                         overlay_edit_mesh.hlsl EDGE
 overlay_edit_mesh_face                         overlay_edit_mesh.hlsl FACE
 overlay_edit_mesh_facedot                      overlay_edit_mesh.hlsl FACEDOT
 overlay_edit_mesh_depth                        overlay_edit_mesh.hlsl DEPTH
+overlay_extra_point                            overlay_extra_point.hlsl
+overlay_extra_loose_point                      overlay_extra_point.hlsl LOOSE
+overlay_extra_wire                             overlay_extra_wire.hlsl
+overlay_extra_wire_object                      overlay_extra_wire.hlsl OBJECT_WIRE
+overlay_extra_groundline                       overlay_extra_groundline.hlsl
+overlay_wireframe                              overlay_wireframe.hlsl

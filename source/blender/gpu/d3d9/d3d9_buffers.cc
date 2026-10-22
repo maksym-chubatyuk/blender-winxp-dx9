@@ -81,6 +81,36 @@ D3D9StorageBuf::D3D9StorageBuf(size_t size, const char *name) : StorageBuf(size,
 D3D9StorageBuf::~D3D9StorageBuf()
 {
   this->unbind();
+  d3d9_release(vbo_);
+}
+
+IDirect3DVertexBuffer9 *D3D9StorageBuf::vertex_buffer_get()
+{
+  if (vbo_ && !vbo_dirty_) {
+    return vbo_;
+  }
+  if (host_data_.is_empty()) {
+    return nullptr;
+  }
+  if (vbo_ == nullptr || vbo_size_ < host_data_.size()) {
+    d3d9_release(vbo_);
+    vbo_size_ = 0;
+    IDirect3DDevice9 *device = D3D9Backend::get()->device;
+    if (!D3D9_CHECK(device->CreateVertexBuffer(
+            UINT(host_data_.size()), D3DUSAGE_WRITEONLY, 0, D3DPOOL_MANAGED, &vbo_, nullptr)))
+    {
+      vbo_ = nullptr;
+      return nullptr;
+    }
+    vbo_size_ = host_data_.size();
+  }
+  void *dst;
+  if (SUCCEEDED(vbo_->Lock(0, UINT(host_data_.size()), &dst, 0))) {
+    memcpy(dst, host_data_.data(), host_data_.size());
+    vbo_->Unlock();
+  }
+  vbo_dirty_ = false;
+  return vbo_;
 }
 
 void D3D9StorageBuf::bind(int slot)
@@ -103,11 +133,13 @@ void D3D9StorageBuf::unbind()
 
 void D3D9StorageBuf::update(const void *data)
 {
+  vbo_dirty_ = true;
   memcpy(host_data_.data(), data, min_zz(usage_size_in_bytes_, host_data_.size()));
 }
 
 void D3D9StorageBuf::clear(uint32_t clear_value)
 {
+  vbo_dirty_ = true;
   uint32_t *data = reinterpret_cast<uint32_t *>(host_data_.data());
   for (size_t i = 0; i < host_data_.size() / 4; i++) {
     data[i] = clear_value;
@@ -122,6 +154,7 @@ void D3D9StorageBuf::copy_sub(VertBuf *src, uint dst_offset, uint src_offset, ui
     return;
   }
   memcpy(host_data_.data() + dst_offset, data + src_offset, copy_size);
+  vbo_dirty_ = true;
 }
 
 void D3D9StorageBuf::read(void *data)
