@@ -319,9 +319,12 @@ void D3D9Batch::draw_indirect(StorageBuf *indirect_buf, intptr_t offset)
     return;
   }
   if (elem) {
-    /* DrawElementsIndirectCommand: count, instance_count, first_index, base_vertex, base_inst. */
+    /* DrawElementsIndirectCommand: count, instance_count, first_index, base_vertex, base_inst.
+     * The first index is in the source buffer (sub-range start included), `draw` adds the
+     * sub-range start. */
     const uint32_t *cmd = reinterpret_cast<const uint32_t *>(data + offset);
-    draw(int(cmd[2]), int(cmd[0]), int(cmd[4]), int(cmd[1]));
+    const int first = int(cmd[2]) - int(static_cast<D3D9IndexBuf *>(elem)->draw_start_get());
+    draw(first, int(cmd[0]), int(cmd[4]), int(cmd[1]));
   }
   else {
     /* DrawArraysIndirectCommand: count, instance_count, first, base_instance. */
