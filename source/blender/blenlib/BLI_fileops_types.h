@@ -28,11 +28,7 @@ struct direntry {
   const char *relname;
   const char *path;
 #ifdef WIN32 /* keep in sync with the definition of BLI_stat_t in BLI_fileops.h */
-#  if defined(_MSC_VER)
   struct _stat64 s;
-#  else
-  struct _stat s;
-#  endif
 #else
   struct stat s;
 #endif

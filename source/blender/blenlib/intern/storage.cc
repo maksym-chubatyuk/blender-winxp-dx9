@@ -416,11 +416,7 @@ bool BLI_exists(const char *path)
 #ifdef WIN32
 int BLI_fstat(int fd, BLI_stat_t *buffer)
 {
-#  if defined(_MSC_VER)
   return _fstat64(fd, buffer);
-#  else
-  return _fstat(fd, buffer);
-#  endif
 }
 
 int BLI_stat(const char *path, BLI_stat_t *buffer)
@@ -436,11 +432,7 @@ int BLI_stat(const char *path, BLI_stat_t *buffer)
 
 int BLI_wstat(const wchar_t *path, BLI_stat_t *buffer)
 {
-#  if defined(_MSC_VER)
   return _wstat64(path, buffer);
-#  else
-  return _wstat(path, buffer);
-#  endif
 }
 #else
 int BLI_fstat(int fd, struct stat *buffer)

@@ -18,7 +18,9 @@
 #include <opensubdiv/version.h>
 
 #include "internal/evaluator/eval_output_cpu.h"
-#include "internal/evaluator/eval_output_gpu.h"
+#ifdef WITH_OPENSUBDIV_GPU_EVALUATOR
+#  include "internal/evaluator/eval_output_gpu.h"
+#endif
 #include "internal/evaluator/evaluator_cache_impl.h"
 #include "internal/evaluator/patch_map.h"
 #include "opensubdiv_evaluator.hh"
@@ -542,8 +544,14 @@ OpenSubdiv_Evaluator *openSubdiv_createEvaluatorFromTopologyRefiner(
   // Create OpenSubdiv's CPU side evaluator.
   blender::opensubdiv::EvalOutputAPI::EvalOutput *eval_output = nullptr;
 
+#ifdef WITH_OPENSUBDIV_GPU_EVALUATOR
   const bool use_gpu_evaluator = evaluator_type == OPENSUBDIV_EVALUATOR_GPU;
+#else
+  const bool use_gpu_evaluator = false;
+  (void)evaluator_cache_descr;
+#endif
   if (use_gpu_evaluator) {
+#ifdef WITH_OPENSUBDIV_GPU_EVALUATOR
     blender::opensubdiv::GpuEvalOutput::EvaluatorCache *evaluator_cache = nullptr;
     if (evaluator_cache_descr) {
       evaluator_cache = static_cast<blender::opensubdiv::GpuEvalOutput::EvaluatorCache *>(
@@ -556,6 +564,7 @@ OpenSubdiv_Evaluator *openSubdiv_createEvaluatorFromTopologyRefiner(
                                                          2,
                                                          patch_table,
                                                          evaluator_cache);
+#endif
   }
   else {
     eval_output = new blender::opensubdiv::CpuEvalOutput(

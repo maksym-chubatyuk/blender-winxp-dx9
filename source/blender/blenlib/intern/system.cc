@@ -69,7 +69,7 @@ int BLI_cpu_support_sse2()
 }
 
 /* Windows stack-walk lives in system_win32.cc */
-#if !defined(_MSC_VER)
+#if !defined(_WIN32)
 void BLI_system_backtrace_with_os_info(FILE *fp, const void * /*os_info*/)
 {
   /* ----------------------- */

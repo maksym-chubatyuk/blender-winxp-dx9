@@ -238,8 +238,9 @@ static void image_foreach_cache(ID *id,
     function_callback(id, &key, reinterpret_cast<void **>(&slot.render), 0, user_data);
   }
 
-  /* Ensure we don't collide with the identifiers used above. */
-  constexpr size_t runtime_base_id = size_t(1) << 32u;
+  /* Ensure we don't collide with the identifiers used above. With a 32-bit `size_t` stay clear of
+   * the struct offsets at least, slot name hashes span the whole range there. */
+  constexpr size_t runtime_base_id = size_t(1) << (sizeof(size_t) == 8 ? 32u : 30u);
 
   key.identifier = runtime_base_id + offsetof(bke::ImageRuntime, cache);
   function_callback(id, &key, reinterpret_cast<void **>(&image->runtime->cache), 0, user_data);

@@ -1399,7 +1399,7 @@ void BLI_setenv_if_new(const char *env, const char *val)
 
 const char *BLI_getenv(const char *env)
 {
-#ifdef _MSC_VER
+#ifdef _WIN32
   const char *result = nullptr;
   /* 32767 is the maximum size of the environment variable on windows,
    * reserve one more character for the zero terminator. */

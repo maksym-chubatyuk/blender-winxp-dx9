@@ -218,7 +218,7 @@ static bool try_map_zeros(BLI_mmap_file *file)
   return true;
 }
 
-static LONG page_exception_handler(EXCEPTION_POINTERS *ExceptionInfo) noexcept
+static LONG WINAPI page_exception_handler(EXCEPTION_POINTERS *ExceptionInfo) noexcept
 {
   /* On Windows, if an IO error occurs trying to read from a mapped file, an
    * EXCEPTION_IN_PAGE_ERROR error will be raised. Also check for

@@ -8,7 +8,6 @@
 #include <Windows.h>
 #include <strsafe.h>
 
-#include <PathCch.h>
 #include <tlhelp32.h>
 
 static BOOL LaunchedFromSteam(void)
@@ -89,13 +88,14 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     return -1;
   }
 
-  /* Remove the filename (blender-launcher.exe) from path. */
-  if (PathCchRemoveFileSpec(path, MAX_PATH) != S_OK) {
+  /* Replace the filename (blender-launcher.exe) with blender.exe, resulting in the full path to
+   * the blender executable. Plain string handling: `PathCch` needs Windows 8. */
+  wchar_t *filename = wcsrchr(path, L'\\');
+  if (!filename) {
     return -1;
   }
-
-  /* Add blender.exe to path, resulting in the full path to the blender executable. */
-  if (PathCchCombine(path, MAX_PATH, path, L"blender.exe") != S_OK) {
+  filename++;
+  if (StringCchCopyW(filename, MAX_PATH - (filename - path), L"blender.exe") != S_OK) {
     return -1;
   }
 

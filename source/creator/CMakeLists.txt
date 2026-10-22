@@ -156,8 +156,14 @@ endif()
 
 # MSVC 2010 gives linking errors with the manifest.
 if(WIN32 AND NOT UNIX)
+  if(MINGW)
+    # `windres` passes definitions through a shell, which strips the quotes of a string:
+    # `winblender.rc` makes it from this one instead.
+    add_definitions(-DWINDRES -DBLEN_VER_RC_STR_M=${BLENDER_VERSION})
+  else()
+    add_definitions(-DBLEN_VER_RC_STR="${BLENDER_VERSION}")
+  endif()
   add_definitions(
-    -DBLEN_VER_RC_STR="${BLENDER_VERSION}"
     -DBLEN_VER_RC_1=${BLENDER_VERSION_MAJOR}
     -DBLEN_VER_RC_2=${BLENDER_VERSION_MINOR}
     -DBLEN_VER_RC_3=${BLENDER_VERSION_PATCH}
@@ -353,7 +359,10 @@ else()
       )
     endif()
     target_compile_definitions(blender-launcher PRIVATE -D_UNICODE -DUNICODE)
-    target_link_libraries(blender-launcher Pathcch.lib)
+    if(MINGW)
+      # Entry point is `wWinMain`.
+      target_link_options(blender-launcher PRIVATE -municode)
+    endif()
   endif()
 endif()
 
@@ -577,7 +586,8 @@ install(
   DIRECTORY ${CMAKE_SOURCE_DIR}/release/datafiles/colormanagement
   DESTINATION ${TARGETDIR_VER}/datafiles
 )
-if(WIN32)
+# Pre-compiled library files (MSVC builds), MinGW builds link these statically.
+if(WIN32 AND NOT MINGW)
   if(EXISTS ${LIBDIR}/osl/lib/python${PYTHON_VERSION}/site-packages/oslquery) # 4.4+
     install(
       DIRECTORY ${LIBDIR}/osl/lib/python${PYTHON_VERSION}/site-packages/oslquery
@@ -1035,6 +1045,38 @@ if(UNIX AND NOT APPLE)
     endif()
   endif()
 
+elseif(WIN32 AND MINGW)
+  # Static MinGW build (Windows XP, see `build_files/xp/`): libraries are linked in, only Python
+  # ships as separate files.
+  if(WITH_PYTHON)
+    # MinGW Python (`build_files/xp/python.sh`) uses the POSIX layout: `lib/python3.x` holds the
+    # standard library with its extension modules in `lib-dynload`.
+    install(
+      FILES ${PYTHON_ROOT}/bin/libpython${PYTHON_VERSION}.dll
+      DESTINATION ${TARGETDIR_EXE}
+    )
+    if(WITH_PYTHON_INSTALL)
+      install(
+        DIRECTORY ${PYTHON_ROOT}/lib/python${PYTHON_VERSION}
+        DESTINATION ${TARGETDIR_VER}/python/lib
+        PATTERN "__pycache__" EXCLUDE
+        PATTERN "*.pyc" EXCLUDE
+        PATTERN "test" EXCLUDE
+        PATTERN "idlelib" EXCLUDE
+        PATTERN "tkinter" EXCLUDE
+        PATTERN "turtledemo" EXCLUDE
+        PATTERN "ensurepip" EXCLUDE
+        PATTERN "config-${PYTHON_VERSION}*" EXCLUDE
+        PATTERN "_test*.pyd" EXCLUDE
+        # Needs `libwinpthread-1.dll`, Python works without WMI.
+        PATTERN "_wmi*.pyd" EXCLUDE
+      )
+      install(
+        FILES ${PYTHON_ROOT}/bin/python${PYTHON_VERSION}.exe
+        DESTINATION ${TARGETDIR_VER}/python/bin
+      )
+    endif()
+  endif()
 elseif(WIN32)
   if(WITH_WINDOWS_EXTERNAL_MANIFEST)
     install(
@@ -1047,10 +1089,12 @@ elseif(WIN32)
       RENAME blender-launcher.exe.manifest
     )
   endif()
-  windows_install_shared_manifest(
-    FILES ${LIBDIR}/epoxy/bin/epoxy-0.dll
-    ALL
-  )
+  if(WITH_OPENGL_BACKEND)
+    windows_install_shared_manifest(
+      FILES ${LIBDIR}/epoxy/bin/epoxy-0.dll
+      ALL
+    )
+  endif()
 
   if(WITH_VULKAN_BACKEND)
     windows_install_shared_manifest(

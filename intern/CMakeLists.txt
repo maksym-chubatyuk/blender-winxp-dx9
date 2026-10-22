@@ -14,6 +14,10 @@ add_subdirectory(mikktspace)
 add_subdirectory(eigen)
 add_subdirectory(sky)
 
+if(WIN32 AND MINGW)
+  add_subdirectory(xpcompat)
+endif()
+
 add_subdirectory(openvdb)
 
 if(WITH_MOD_REMESH)

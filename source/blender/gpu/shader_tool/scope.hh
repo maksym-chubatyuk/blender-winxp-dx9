@@ -51,13 +51,14 @@ struct Scope {
   /* Create an invalid scope. */
   Scope(const ParserBase &parser) : Scope(parser, -1) {}
 
+  /* Signed compare: with a 32-bit `size_t` the size is promoted to `int64_t` and -1 would pass. */
   bool is_valid() const
   {
-    return index_ < parser_->scope_types.size();
+    return index_ >= 0 && index_ < int64_t(parser_->scope_types.size());
   }
   bool is_invalid() const
   {
-    return index_ >= parser_->scope_types.size();
+    return !is_valid();
   }
 
   Token operator[](int i)

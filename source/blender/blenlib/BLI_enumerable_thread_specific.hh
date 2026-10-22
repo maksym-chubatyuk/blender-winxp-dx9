@@ -25,7 +25,13 @@ namespace blender::threading {
 #ifndef WITH_TBB
 namespace enumerable_thread_specific_utils {
 inline std::atomic<int> next_id = 0;
-inline thread_local int thread_id = next_id.fetch_add(1, std::memory_order_relaxed);
+/* A function-local `thread_local`: for an `inline thread_local` variable, MinGW GCC emits the TLS
+ * init function as a strong symbol in every translation unit, which then fails to link. */
+inline int thread_id()
+{
+  static thread_local int id = next_id.fetch_add(1, std::memory_order_relaxed);
+  return id;
+}
 }  // namespace enumerable_thread_specific_utils
 #endif /* !WITH_TBB */
 
@@ -86,7 +92,7 @@ template<typename T> class EnumerableThreadSpecific : NonCopyable, NonMovable {
 
   T &local()
   {
-    const int thread_id = enumerable_thread_specific_utils::thread_id;
+    const int thread_id = enumerable_thread_specific_utils::thread_id();
     std::lock_guard lock{mutex_};
     return values_.lookup_or_add_cb(thread_id, [&]() {
       T *value = static_cast<T *>(::operator new(sizeof(T)));

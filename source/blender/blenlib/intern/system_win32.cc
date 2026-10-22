@@ -196,9 +196,17 @@ static bool BLI_windows_system_backtrace_run_trace(FILE *fp, HANDLE hThread, PCO
   symbolinfo->MaxNameLen = max_symbol_length - 1;
   symbolinfo->SizeOfStruct = sizeof(SYMBOL_INFO);
 
-  STACKFRAME frame = {{0}};
+  STACKFRAME64 frame = {{0}};
   DWORD machineType = 0;
-#if defined(_M_AMD64)
+#if defined(_M_IX86) || defined(__i386__)
+  frame.AddrPC.Offset = context->Eip;
+  frame.AddrPC.Mode = AddrModeFlat;
+  frame.AddrFrame.Offset = context->Ebp;
+  frame.AddrFrame.Mode = AddrModeFlat;
+  frame.AddrStack.Offset = context->Esp;
+  frame.AddrStack.Mode = AddrModeFlat;
+  machineType = IMAGE_FILE_MACHINE_I386;
+#elif defined(_M_AMD64)
   frame.AddrPC.Offset = context->Rip;
   frame.AddrPC.Mode = AddrModeFlat;
   frame.AddrFrame.Offset = context->Rsp;
@@ -594,6 +602,71 @@ static std::wstring url_encode_wstring(const std::string &str)
   return result;
 }
 
+/* Data passed to the crash dialog callback for handling button events. */
+struct CrashDialogData {
+  const wchar_t *filepath_crashlog_utf16;
+  const wchar_t *filepath_relaunch_utf16;
+  const char *gpu_name;
+  const char *build_version;
+};
+
+/* Callback for handling the crash dialog button events. */
+static HRESULT CALLBACK crash_dialog_callback(HWND /*hwnd*/,
+                                              UINT uNotification,
+                                              WPARAM wParam,
+                                              LPARAM /*lParam*/,
+                                              LONG_PTR dwRefData)
+{
+  const CrashDialogData *data_ptr = reinterpret_cast<const CrashDialogData *>(dwRefData);
+  if (uNotification != TDN_BUTTON_CLICKED) {
+    return S_OK;
+  }
+  int pnButton = static_cast<int>(wParam);
+  switch (pnButton) {
+    case IDCLOSE:
+      return S_OK;
+    case IDRETRY: {
+      /* Relaunch the application. */
+      wchar_t executable_path[MAX_PATH];
+      if (bli_executable_path_get(executable_path, ARRAYSIZE(executable_path))) {
+        std::wstring parameters;
+        if (data_ptr->filepath_relaunch_utf16) {
+          /* Properly quote the argument to handle spaces and special characters. */
+          parameters = L"\"" + std::wstring(data_ptr->filepath_relaunch_utf16) + L"\"";
+        }
+        else {
+          /* Proceeding without parameters. */
+          parameters = L"";
+        }
+        ShellExecuteW(
+            nullptr, L"open", executable_path, parameters.c_str(), nullptr, SW_SHOWNORMAL);
+      }
+      return S_OK;
+    }
+    case IDHELP:
+      /* Open the crash log. */
+      ShellExecuteW(
+          nullptr, L"open", data_ptr->filepath_crashlog_utf16, nullptr, nullptr, SW_SHOWNORMAL);
+      return S_FALSE;
+    case IDOK: {
+      /* Open the bug report form with pre-filled data. */
+      /* clang-format off */
+      std::wstring link =
+          L"https://redirect.blender.org/"
+          L"?type=bug_report"
+          L"&project=blender"
+          L"&os=" + url_encode_wstring(get_os_info()) +
+          L"&gpu=" + url_encode_wstring(data_ptr->gpu_name) +
+          L"&broken_version=" + url_encode_wstring(data_ptr->build_version);
+      /* clang-format on */
+      ShellExecuteW(nullptr, L"open", link.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+      return S_FALSE;
+    }
+    default:
+      return S_FALSE;
+  }
+  }
+
 void BLI_windows_exception_show_dialog(const char *filepath_crashlog,
                                        const char *filepath_relaunch,
                                        const char *gpu_name,
@@ -638,69 +711,10 @@ void BLI_windows_exception_show_dialog(const char *filepath_crashlog,
   config.cButtons = ARRAY_SIZE(buttons);
 
   /* Data passed to the callback function for handling button events. */
-  const struct Data {
-    const wchar_t *filepath_crashlog_utf16;
-    const wchar_t *filepath_relaunch_utf16;
-    const char *gpu_name;
-    const char *build_version;
-  } data = {filepath_crashlog_utf16, filepath_relaunch_utf16, gpu_name, build_version};
+  const CrashDialogData data = {
+      filepath_crashlog_utf16, filepath_relaunch_utf16, gpu_name, build_version};
   config.lpCallbackData = reinterpret_cast<LONG_PTR>(&data);
-
-  /* Callback for handling button events. */
-  config.pfCallback = [](HWND /*hwnd*/,
-                         UINT uNotification,
-                         WPARAM wParam,
-                         LPARAM /*lParam*/,
-                         LONG_PTR dwRefData) -> HRESULT {
-    const Data *data_ptr = reinterpret_cast<const Data *>(dwRefData);
-    if (uNotification != TDN_BUTTON_CLICKED) {
-      return S_OK;
-    }
-    int pnButton = static_cast<int>(wParam);
-    switch (pnButton) {
-      case IDCLOSE:
-        return S_OK;
-      case IDRETRY: {
-        /* Relaunch the application. */
-        wchar_t executable_path[MAX_PATH];
-        if (bli_executable_path_get(executable_path, ARRAYSIZE(executable_path))) {
-          std::wstring parameters;
-          if (data_ptr->filepath_relaunch_utf16) {
-            /* Properly quote the argument to handle spaces and special characters. */
-            parameters = L"\"" + std::wstring(data_ptr->filepath_relaunch_utf16) + L"\"";
-          }
-          else {
-            /* Proceeding without parameters. */
-            parameters = L"";
-          }
-          ShellExecuteW(
-              nullptr, L"open", executable_path, parameters.c_str(), nullptr, SW_SHOWNORMAL);
-        }
-        return S_OK;
-      }
-      case IDHELP:
-        /* Open the crash log. */
-        ShellExecuteW(
-            nullptr, L"open", data_ptr->filepath_crashlog_utf16, nullptr, nullptr, SW_SHOWNORMAL);
-        return S_FALSE;
-      case IDOK: {
-        /* Open the bug report form with pre-filled data. */
-        /* clang-format off */
-        std::wstring link =
-            L"https://redirect.blender.org/"
-            L"?type=bug_report"
-            L"&project=blender"
-            L"&os=" + url_encode_wstring(get_os_info()) +
-            L"&gpu=" + url_encode_wstring(data_ptr->gpu_name) +
-            L"&broken_version=" + url_encode_wstring(data_ptr->build_version);
-        /* clang-format on */
-        ShellExecuteW(nullptr, L"open", link.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-        return S_FALSE;
-      }
-      default:
-        return S_FALSE;
-    }
-  };
+  config.pfCallback = crash_dialog_callback;
 
   TaskDialogIndirect(&config, nullptr, nullptr, nullptr);
   free(static_cast<void *>(filepath_crashlog_utf16));

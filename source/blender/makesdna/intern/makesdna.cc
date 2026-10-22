@@ -216,6 +216,35 @@ static TypeTable build_type_table(const Span<dna::ParsedStruct> parsed_structs)
 /** \name Type Sizes and Alignment
  * \{ */
 
+/**
+ * 32-bit Windows (MSVC and MinGW ABI) aligns 8-byte members to 8 bytes, including nested structs
+ * holding them. The DNA checks only guarantee that for nested structs in the 64-bit layout, where
+ * the preceding pointers are 8 bytes, so the compiler may pad where the DNA layout doesn't.
+ * Such padding is made explicit in the native SDNA as `char` members with this prefix: files
+ * stay readable everywhere, members are matched by name.
+ */
+#if defined(_WIN32) && !defined(_WIN64)
+#  define DNA_NATIVE_ALIGN_PADDING
+#endif
+static constexpr const char *native_align_pad_prefix = "_pad_native_align_";
+
+static bool member_is_native_align_pad(const dna::ParsedMember &parsed_member)
+{
+  return StringRef(parsed_member.member_name).startswith(native_align_pad_prefix);
+}
+
+#ifdef DNA_NATIVE_ALIGN_PADDING
+static dna::ParsedMember native_align_pad_member(const int index, const int size)
+{
+  dna::ParsedMember pad;
+  pad.type_name = "char";
+  pad.member_name = std::string(native_align_pad_prefix) + std::to_string(index) + "[" +
+                    std::to_string(size) + "]";
+  pad.alias_member_name = pad.member_name;
+  return pad;
+}
+#endif
+
 /** Native byte size contributed by a single member to the struct. */
 static int member_size_native(const TypeInfo &member_type, const dna::ParsedMember &parsed_member)
 {
@@ -281,7 +310,7 @@ static bool check_member_alignment(const TypeInfo &struct_info,
 
 /** Determine how many bytes are needed for each struct. */
 static int compute_type_size_and_alignment(TypeTable &table,
-                                           Span<dna::ParsedStruct> parsed_structs)
+                                           MutableSpan<dna::ParsedStruct> parsed_structs)
 {
   bool dna_error = false;
 
@@ -291,7 +320,7 @@ static int compute_type_size_and_alignment(TypeTable &table,
     const int lastunknown = unknown;
     unknown = 0;
 
-    for (const dna::ParsedStruct &parsed_struct : parsed_structs) {
+    for (dna::ParsedStruct &parsed_struct : parsed_structs) {
       TypeInfo &struct_info = table.lookup(parsed_struct.type_name);
 
       /* When size is not known yet. */
@@ -302,10 +331,36 @@ static int compute_type_size_and_alignment(TypeTable &table,
         /* Sizes of the largest field in a struct. */
         int max_align_32 = 0;
         int max_align_64 = 0;
+#ifdef DNA_NATIVE_ALIGN_PADDING
+        int native_pad_num = 0;
+#endif
 
         /* check all members in struct */
-        for (const dna::ParsedMember &parsed_member : parsed_struct.members) {
+        for (int member_index = 0; member_index < parsed_struct.members.size(); member_index++) {
+          const dna::ParsedMember &parsed_member = parsed_struct.members[member_index];
           const TypeInfo &member_type = table.lookup(parsed_member.type_name);
+          if (member_is_native_align_pad(parsed_member)) {
+            /* Native layout only, inserted by an earlier pass over this struct. */
+#ifdef DNA_NATIVE_ALIGN_PADDING
+            native_pad_num++;
+#endif
+            size_native += member_size_native(member_type, parsed_member);
+            continue;
+          }
+#ifdef DNA_NATIVE_ALIGN_PADDING
+          const bool is_pointer = parsed_member.member_name[0] == '*' ||
+                                  parsed_member.member_name[1] == '*';
+          if (!is_pointer && member_type.is_struct && member_type.size_native &&
+              member_type.align_32 > 4 && size_native % member_type.align_32)
+          {
+            const int pad = member_type.align_32 - size_native % member_type.align_32;
+            parsed_struct.members.insert(member_index,
+                                         native_align_pad_member(native_pad_num, pad));
+            /* Process the inserted padding, then this member again. */
+            member_index--;
+            continue;
+          }
+#endif
           const char *cp = parsed_member.member_name.c_str();
           const int namelen = int(parsed_member.member_name.size());
 
@@ -425,6 +480,14 @@ static int compute_type_size_and_alignment(TypeTable &table,
             break;
           }
         }
+
+#ifdef DNA_NATIVE_ALIGN_PADDING
+        if (size_native != 0 && max_align_32 > 4 && size_native % max_align_32) {
+          const int pad = max_align_32 - size_native % max_align_32;
+          parsed_struct.members.append(native_align_pad_member(native_pad_num, pad));
+          size_native += pad;
+        }
+#endif
 
         if (size_native == 0) {
           unknown++;
@@ -781,6 +844,11 @@ static void write_sdna_verify(FILE *file,
     int offset = 0;
     for (const dna::ParsedMember &parsed_member : parsed_struct.members) {
       const TypeInfo &member_type = table.lookup(parsed_member.type_name);
+      if (member_is_native_align_pad(parsed_member)) {
+        /* Not in the C++ struct, it's the compiler's own padding. */
+        offset += member_size_native(member_type, parsed_member);
+        continue;
+      }
       const StringRef alias_id = DNA_member_id_string_ref(parsed_member.alias_member_name);
       fprintf(file,
               "BLI_STATIC_ASSERT(offsetof(struct %s, %.*s) == %d, \"DNA member offset "

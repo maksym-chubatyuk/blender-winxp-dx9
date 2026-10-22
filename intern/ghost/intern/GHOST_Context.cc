@@ -13,7 +13,9 @@
 #ifdef _WIN32
 #  include <windows.h>
 
-#  include <epoxy/wgl.h>
+#  ifdef WITH_OPENGL_BACKEND
+#    include <epoxy/wgl.h>
+#  endif
 #  include <tchar.h>
 #
 #  ifndef ERROR_PROFILE_DOES_NOT_MATCH_DEVICE
@@ -59,6 +61,7 @@ bool win32_chk(bool result, const char *file, int line, const char *text)
      * i.e: 0xC0072095 instead of 0x2095 for ERROR_INVALID_VERSION_ARB
      * So strip down the error to the valid error code range. */
     switch (error & 0x0000FFFF) {
+#  ifdef WITH_OPENGL_BACKEND
       case ERROR_INVALID_VERSION_ARB:
         msg =
             "The specified OpenGL version and feature set are either invalid or not supported.\n";
@@ -89,6 +92,7 @@ bool win32_chk(bool result, const char *file, int line, const char *text)
         msg = "The rendering context does not have an affinity mask set.\n";
         break;
 #  endif
+#  endif /* WITH_OPENGL_BACKEND */
 
       case ERROR_PROFILE_DOES_NOT_MATCH_DEVICE:
         msg =

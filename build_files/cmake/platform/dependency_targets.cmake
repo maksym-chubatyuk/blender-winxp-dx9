@@ -141,7 +141,10 @@ target_link_libraries(bf_deps_png INTERFACE ${PNG_LIBRARIES})
 # Configure OpenImageIO
 
 add_library(bf::dependencies::openimageio ALIAS OpenImageIO::OpenImageIO)
-get_target_property(OPENIMAGEIO_TOOL OpenImageIO::oiiotool LOCATION)
+# Builds without the OIIO tools (e.g. the Windows XP cross-build) only lack the image tests.
+if(TARGET OpenImageIO::oiiotool)
+  get_target_property(OPENIMAGEIO_TOOL OpenImageIO::oiiotool LOCATION)
+endif()
 
 # -----------------------------------------------------------------------------
 # Configure USD
@@ -461,7 +464,13 @@ endif()
 # Configure libfmt
 #
 
-add_library(bf::dependencies::fmt ALIAS fmt::fmt)
+if(MINGW)
+  # OpenImageIO uses fmt header-only, so its objects carry inline copies of fmt functions which
+  # clash with the compiled library on PE targets. Use the same header-only variant.
+  add_library(bf::dependencies::fmt ALIAS fmt::fmt-header-only)
+else()
+  add_library(bf::dependencies::fmt ALIAS fmt::fmt)
+endif()
 
 # -----------------------------------------------------------------------------
 # Configure OSL

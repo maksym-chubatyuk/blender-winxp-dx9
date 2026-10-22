@@ -46,14 +46,10 @@ if(WITH_OPENSUBDIV)
     internal/evaluator/eval_output.h
     internal/evaluator/eval_output_cpu.cc
     internal/evaluator/eval_output_cpu.h
-    internal/evaluator/eval_output_gpu.cc
-    internal/evaluator/eval_output_gpu.h
     internal/evaluator/evaluator_cache_impl.cc
     internal/evaluator/evaluator_cache_impl.h
     internal/evaluator/evaluator_capi.cc
     internal/evaluator/evaluator_impl.cc
-    internal/evaluator/gpu_compute_evaluator.cc
-    internal/evaluator/gpu_compute_evaluator.h
     internal/evaluator/gpu_patch_table.cc
     internal/evaluator/gpu_patch_table.hh
     internal/evaluator/gpu_vertex_buffer_wrapper.hh
@@ -72,8 +68,22 @@ if(WITH_OPENSUBDIV)
 
   list(APPEND LIB
     bf::dependencies::optional::opensubdiv
-    bf::dependencies::epoxy
   )
+
+  # GPU evaluation (compute shaders, OpenSubdiv's GL patch tables). Without it everything is
+  # evaluated on the CPU: the Windows XP build, whose GPUs have no compute shaders nor OpenGL.
+  if(NOT (WIN32 AND MINGW))
+    add_definitions(-DWITH_OPENSUBDIV_GPU_EVALUATOR)
+    list(APPEND SRC
+      internal/evaluator/eval_output_gpu.cc
+      internal/evaluator/eval_output_gpu.h
+      internal/evaluator/gpu_compute_evaluator.cc
+      internal/evaluator/gpu_compute_evaluator.h
+    )
+    list(APPEND LIB
+      bf::dependencies::epoxy
+    )
+  endif()
 
   if(WITH_METAL_BACKEND)
     add_definitions(-DWITH_METAL_BACKEND)

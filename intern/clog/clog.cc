@@ -24,12 +24,12 @@
 #endif
 
 /* For 'isatty' to check for color. */
-#if defined(__unix__) || defined(__APPLE__) || defined(__HAIKU__)
+#if defined(__unix__) || defined(__APPLE__) || defined(__HAIKU__) || defined(__MINGW32__)
 #  include <sys/time.h>
 #  include <unistd.h>
 #endif
 
-#if defined(_MSC_VER)
+#if defined(_WIN32)
 #  include <Windows.h>
 
 #  include <VersionHelpers.h> /* This needs to be included after Windows.h. */
@@ -469,7 +469,7 @@ static void clg_ctx_backtrace(CLogContext *ctx)
 static uint64_t clg_timestamp_ticks_get()
 {
   uint64_t tick;
-#if defined(_MSC_VER)
+#if defined(_WIN32)
   tick = GetTickCount64();
 #else
   struct timeval tv;

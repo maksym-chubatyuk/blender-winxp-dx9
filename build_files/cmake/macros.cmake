@@ -1576,7 +1576,7 @@ function(windows_generate_manifest)
     set(MANIFEST_LIBS "${MANIFEST_LIBS}    <file name=\"${filename}\"/>\n")
   endforeach()
   configure_file(
-    ${CMAKE_SOURCE_DIR}/release/windows/manifest/blender.manifest.in
+    ${CMAKE_SOURCE_DIR}/release/windows/manifest/Blender.manifest.in
     ${WINDOWS_MANIFEST_OUTPUT}
     @ONLY
   )
@@ -1695,7 +1695,7 @@ endfunction()
 # which modifies `CMAKE_*_FLAGS` in the caller's scope.
 macro(optimize_debug_target executable)
   if(WITH_OPTIMIZED_BUILD_TOOLS)
-    if(WIN32)
+    if(MSVC)
       remove_c_and_cxx_flag("/Od" "/RTC1")
       target_compile_options(${executable} PRIVATE "/Ox")
       target_compile_definitions(${executable} PRIVATE "_ITERATOR_DEBUG_LEVEL=0")

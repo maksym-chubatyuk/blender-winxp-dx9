@@ -125,11 +125,7 @@ int BLI_create_symlink(const char *path, const char *path_dst) ATTR_NONNULL();
 
 /* Keep in sync with the definition of struct `direntry` in `BLI_fileops_types.h`. */
 #ifdef WIN32
-#  if defined(_MSC_VER)
 typedef struct _stat64 BLI_stat_t;
-#  else
-typedef struct _stat BLI_stat_t;
-#  endif
 #else
 typedef struct stat BLI_stat_t;
 #endif

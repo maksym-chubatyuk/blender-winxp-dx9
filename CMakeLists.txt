@@ -1540,6 +1540,8 @@ endif()
 
 if(UNIX AND NOT APPLE)
   include(platform_unix)
+elseif(WIN32 AND MINGW)
+  include(platform_win32_mingw)
 elseif(WIN32)
   include(platform_win32)
 elseif(APPLE)

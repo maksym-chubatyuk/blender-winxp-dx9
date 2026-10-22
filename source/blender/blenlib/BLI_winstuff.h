@@ -49,7 +49,9 @@
 #  define F_OK 0
 #endif
 
+#ifndef __MINGW32__ /* MinGW's `sys/types.h` has its own. */
 typedef unsigned int mode_t;
+#endif
 
 /** Directory reading compatibility with UNIX. */
 struct dirent {
