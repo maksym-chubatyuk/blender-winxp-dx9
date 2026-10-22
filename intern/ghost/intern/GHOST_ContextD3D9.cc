@@ -200,7 +200,36 @@ GHOST_TSuccess GHOST_ContextD3D9::swapBufferRelease()
   if (swap_chain_ == nullptr) {
     return GHOST_kFailure;
   }
+  /* `BLENDER_D3D9_FRAMETIME`: print the average present time and frame interval. */
+  static const bool frametime = getenv("BLENDER_D3D9_FRAMETIME") != nullptr;
+  LARGE_INTEGER t0, t1;
+  if (frametime) {
+    QueryPerformanceCounter(&t0);
+  }
   const HRESULT hr = swap_chain_->Present(nullptr, nullptr, nullptr, nullptr, 0);
+  if (frametime) {
+    static LARGE_INTEGER freq = {}, last = {};
+    static double present_sum = 0.0, interval_sum = 0.0;
+    static int frames = 0;
+    QueryPerformanceCounter(&t1);
+    if (freq.QuadPart == 0) {
+      QueryPerformanceFrequency(&freq);
+    }
+    present_sum += double(t1.QuadPart - t0.QuadPart) * 1000.0 / double(freq.QuadPart);
+    if (last.QuadPart != 0) {
+      interval_sum += double(t1.QuadPart - last.QuadPart) * 1000.0 / double(freq.QuadPart);
+    }
+    last = t1;
+    if (++frames == 32) {
+      printf("ghost: present %.2f ms, frame interval %.2f ms (%.1f fps)\n",
+             present_sum / frames,
+             interval_sum / frames,
+             1000.0 * frames / interval_sum);
+      fflush(stdout);
+      present_sum = interval_sum = 0.0;
+      frames = 0;
+    }
+  }
   return SUCCEEDED(hr) ? GHOST_kSuccess : GHOST_kFailure;
 }
 

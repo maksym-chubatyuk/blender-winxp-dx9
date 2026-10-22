@@ -38,6 +38,39 @@ struct D3D9VertexDeclKey {
   bool operator==(const D3D9VertexDeclKey &other) const;
 };
 
+/** Work counters for `BLENDER_D3D9_FRAMETIME`. */
+struct D3D9FrameStats {
+  int draws = 0;
+  int readbacks = 0;
+  size_t upload_bytes = 0;
+  const char *last_readback = "";
+  /* Time spent in the backend per part (ms), see #d3d9_time_ms. */
+  double setup_ms = 0.0;
+  double draw_ms = 0.0;
+  double clear_ms = 0.0;
+  /* Parts of the setup. */
+  double fb_ms = 0.0;
+  double state_ms = 0.0;
+  double texture_ms = 0.0;
+  double constants_ms = 0.0;
+  double scene_ms = 0.0;
+  int textures_created = 0;
+  int textures_freed = 0;
+};
+/** Milliseconds from an arbitrary origin (performance counter). */
+double d3d9_time_ms();
+
+/**
+ * `BLENDER_D3D9_GPUTIME`: GPU time of each draw, measured by waiting for the GPU before and after
+ * it (slow, but it isolates the draws). Summed per shader and printed with the frame times.
+ */
+bool d3d9_gpu_time_enabled();
+/** Wait until the GPU is idle and return the time. */
+double d3d9_gpu_time_begin(IDirect3DDevice9 *device);
+/** Wait until the GPU is done and add the time since #d3d9_gpu_time_begin to the name. */
+void d3d9_gpu_time_end(IDirect3DDevice9 *device, const char *name, double start_ms);
+extern D3D9FrameStats d3d9_frame_stats;
+
 class D3D9Context : public Context {
  public:
   IDirect3DDevice9 *device = nullptr;
@@ -107,12 +140,16 @@ class D3D9Context : public Context {
    * textures and shader constants. Returns false when the draw has to be skipped.
    */
   bool draw_setup();
+  bool draw_setup_impl();
 
   /** Set `gl_InstanceID` for the next draw (reserved constant `c0.w`). */
   void instance_id_set(int instance);
 
   /** Rasterize the points of the next draws as sprites (see #D3D9Shader::point_sprite). */
   void point_sprite_set(bool enable);
+
+  /** Flat shading of the `COLOR` outputs for the next draws (see #D3D9Shader::flat_color). */
+  void flat_color_set(bool enable);
 
   /**
    * Selection draws (`d3d9-select-output` shaders): the fragments write (select id + 1, depth) to
@@ -134,10 +171,13 @@ class D3D9Context : public Context {
  private:
   GHOST_IContext *ghost_context_ = nullptr;
   bool scene_open_ = false;
+  double frame_start_ms_ = 0.0;
   /** Last reserved vertex constants sent by #draw_setup. */
   float4 reserved_constants_[D3D9_RESERVED_VS_CONSTANTS];
   /** Last #D3DRS_POINTSPRITEENABLE value, -1 when unknown. */
   int point_sprite_ = -1;
+  /** Last #D3DRS_SHADEMODE (1 for flat), -1 when unknown. */
+  int flat_color_ = -1;
   Map<D3D9VertexDeclKey, IDirect3DVertexDeclaration9 *> vertex_decls_;
 
   /* Selection draws, see #select_draw_begin. */

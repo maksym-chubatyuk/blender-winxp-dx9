@@ -206,6 +206,7 @@ void D3D9Batch::draw(int v_first, int v_count, int i_first, int i_count)
     return;
   }
   ctx->point_sprite_set(type == D3DPT_POINTLIST && shader->point_sprite());
+  ctx->flat_color_set(shader->flat_color());
   if (trace) {
     printf("  issue type=%d prims=%u v_first=%d inst=%d+%d ib=%p\n",
            int(type),
@@ -236,6 +237,8 @@ void D3D9Batch::draw(int v_first, int v_count, int i_first, int i_count)
     return;
   }
 
+  const double gpu_start_ms = d3d9_gpu_time_enabled() ? d3d9_gpu_time_begin(ctx->device) : 0.0;
+  const double draw_start_ms = d3d9_time_ms();
   const bool per_instance_data = shader->has_instance_data();
   for (int instance = i_first; instance < i_first + i_count; instance++) {
     if (instance != 0 || i_count > 1) {
@@ -270,6 +273,23 @@ void D3D9Batch::draw(int v_first, int v_count, int i_first, int i_count)
   }
   if (i_count > 1 || i_first != 0) {
     ctx->instance_id_set(0);
+  }
+  d3d9_frame_stats.draw_ms += d3d9_time_ms() - draw_start_ms;
+  if (d3d9_gpu_time_enabled()) {
+    const double before_ms = d3d9_time_ms();
+    d3d9_gpu_time_end(ctx->device, shader->name_get().c_str(), gpu_start_ms);
+    if (before_ms - gpu_start_ms > 1.0 || d3d9_time_ms() - gpu_start_ms > 1.0) {
+      const Span<float4> vs = shader->vs_constants_get();
+      printf("d3d9: slow draw %s %.2f ms, %d vertices, %d instances, vs c2..c8:",
+             shader->name_get().c_str(),
+             d3d9_time_ms() - gpu_start_ms,
+             v_count,
+             i_count);
+      for (int c = 2; c < min_ii(vs.size(), 9); c++) {
+        printf(" (%g %g %g %g)", vs[c].x, vs[c].y, vs[c].z, vs[c].w);
+      }
+      printf("\n");
+    }
   }
   if (select_output) {
     ctx->select_draw_end();

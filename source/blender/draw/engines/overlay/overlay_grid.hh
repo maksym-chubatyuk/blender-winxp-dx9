@@ -18,6 +18,7 @@
 
 #include "ED_image.hh"
 #include "ED_view3d.hh"
+#include "GPU_capabilities.hh"
 #include "GPU_texture.hh"
 
 #include "draw_shader_shared.hh"
@@ -40,6 +41,7 @@ class Grid : Overlay {
   int grid_flag_ = 0;
   int axis_flag_ = 0;
   uint num_iters_ = 0;
+  bool single_persp_iteration_ = false;
 
  public:
   void begin_sync(Resources &res, const State &state) final
@@ -93,7 +95,9 @@ class Grid : Overlay {
           sub.state_set(grid_draw_state);
         }
 
-        sub.push_constant("grid_iter", grid_iter);
+        /* A single iteration on Shader Model 2.0 hardware (see #num_iters_): -1 doubles the alpha,
+         * about the sum of the 4 iterations. */
+        sub.push_constant("grid_iter", num_iters_ == 1 && single_persp_iteration_ ? -1 : grid_iter);
         if (axis_flag_) {
           sub.push_constant("grid_flag", &axis_flag_);
           sub.draw_procedural(GPUPrimType::GPU_PRIM_LINES, -1, axis_vertex_count, 0);
@@ -212,6 +216,7 @@ class Grid : Overlay {
     /* This suffices for most cases, and in others we fade to hide it. */
     grid_ubo_.num_lines = 601u;
     num_iters_ = 1u;
+    single_persp_iteration_ = false;
 
     return true;
   }
@@ -401,6 +406,12 @@ class Grid : Overlay {
     /* TODO (not_mark): make this view-dependent in orthographic to have full coverage */
     grid_ubo_.num_lines = rv3d->is_persp ? 151u : 301u;
     num_iters_ = rv3d->is_persp ? OVERLAY_GRID_ITER_LEN : 1u;
+    /* The iterations draw the same lines with more transparency (and depth offsets), the vertex
+     * shader is expensive on Shader Model 2.0 hardware: draw them once. */
+    single_persp_iteration_ = rv3d->is_persp && !GPU_compute_shader_support();
+    if (single_persp_iteration_) {
+      num_iters_ = 1u;
+    }
 
     return true;
   }

@@ -72,6 +72,7 @@ void D3D9Immediate::end()
     return;
   }
   ctx->point_sprite_set(type == D3DPT_POINTLIST && d3d9_shader->point_sprite());
+  ctx->flat_color_set(d3d9_shader->flat_color());
 
   D3D9VertexLayout layout;
   layout.init(vertex_format);
@@ -169,7 +170,13 @@ void D3D9Immediate::end()
   }
   device->SetVertexDeclaration(decl);
   device->SetStreamSource(0, vbo_, 0, layout.stride);
+  const double gpu_start_ms = d3d9_gpu_time_enabled() ? d3d9_gpu_time_begin(device) : 0.0;
+  const double draw_start_ms = d3d9_time_ms();
   device->DrawPrimitive(type, offset / layout.stride, prim_len);
+  d3d9_frame_stats.draw_ms += d3d9_time_ms() - draw_start_ms;
+  if (d3d9_gpu_time_enabled()) {
+    d3d9_gpu_time_end(device, d3d9_shader->name_get().c_str(), gpu_start_ms);
+  }
 }
 
 }  // namespace blender::gpu

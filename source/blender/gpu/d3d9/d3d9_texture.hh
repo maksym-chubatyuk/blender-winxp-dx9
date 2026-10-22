@@ -71,6 +71,8 @@ class D3D9Texture : public Texture {
 
   /** Texture to sample from, created on first use. Null for depth textures. */
   IDirect3DBaseTexture9 *base_texture_get();
+  /** Clear with `ColorFill`, false when it isn't possible (see #clear). */
+  bool clear_on_device(const double4 &data);
   /** Surface of a mip level to render into, the texture becomes a render target. */
   IDirect3DSurface9 *surface_get(int mip, int layer);
 

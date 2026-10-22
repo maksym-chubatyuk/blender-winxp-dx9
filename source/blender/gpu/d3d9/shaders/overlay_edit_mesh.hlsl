@@ -90,6 +90,16 @@ struct VertOut {
   /* Crease color and amount (vertices). */
   float4 crease : COLOR1;
 };
+#elif defined(EDGE)
+/* The color of the first vertex is used for the whole edge (FLAT in the GLSL) unless both
+ * vertices are to be blended, in vertex selection mode. */
+// d3d9-flat-color
+struct VertOut {
+  float4 position : POSITION;
+  float4 color : TEXCOORD0;
+  /* Color of the edge, alpha: use it instead of the blended color (`select_override`). */
+  float4 flat_color : COLOR0;
+};
 #else
 struct VertOut {
   float4 position : POSITION;
@@ -147,6 +157,8 @@ VertOut vert(VertIn v)
   outer = masked_flag(v.data.y, data_mask.y, 32.0) > 0.5 ? TH_EDGE_SEAM : outer;
   color = (outer.a > 0.0 && is_selected < 0.5) ? outer : inner;
   color.a = 1.0;
+  /* `select_override`: whole edge in the color of its first vertex. */
+  const float select_override = use_vertex_selection > 0.5 ? edge_selected : 1.0;
   clip_pos.z -= outer.a > 0.0 ? 5e-7 * abs(clip_pos.w) : 0.0;
 #elif defined(FACE)
   float face_active = masked_flag(v.data.x, data_mask.x, 1.0);
@@ -197,6 +209,9 @@ VertOut vert(VertIn v)
   clip_pos.z -= ndc_offset_factor * ndc_offset;
   o.position = gpu_position(clip_pos);
   o.color = saturate(color);
+#ifdef EDGE
+  o.flat_color = float4(o.color.rgb, select_override);
+#endif
   return o;
 }
 
@@ -226,6 +241,9 @@ FragOut frag(VertOut v)
 {
   FragOut o;
   o.color = v.color;
+#ifdef EDGE
+  o.color = v.flat_color.a > 0.5 ? float4(v.flat_color.rgb, 1.0) : v.color;
+#endif
   o.line_output = float4(0.0, 0.0, 0.0, 0.0);
   return o;
 }

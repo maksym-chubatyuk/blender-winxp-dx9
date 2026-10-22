@@ -7,7 +7,9 @@
  */
 
 #include <cstdio>
+#include <algorithm>
 #include <cstring>
+#include <string>
 
 #include "BLI_hash.hh"
 #include "BLI_math_base.h"
@@ -153,15 +155,122 @@ void D3D9Context::deactivate()
   is_active_ = false;
 }
 
+D3D9FrameStats d3d9_frame_stats;
+
+double d3d9_time_ms()
+{
+  static LARGE_INTEGER freq = {};
+  if (freq.QuadPart == 0) {
+    QueryPerformanceFrequency(&freq);
+  }
+  LARGE_INTEGER t;
+  QueryPerformanceCounter(&t);
+  return double(t.QuadPart) * 1000.0 / double(freq.QuadPart);
+}
+
+bool d3d9_gpu_time_enabled()
+{
+  static const bool enabled = getenv("BLENDER_D3D9_GPUTIME") != nullptr;
+  return enabled;
+}
+
+static Map<std::string, double> &gpu_times()
+{
+  static Map<std::string, double> times;
+  return times;
+}
+
+static void gpu_wait_idle(IDirect3DDevice9 *device)
+{
+  static IDirect3DQuery9 *query = nullptr;
+  if (query == nullptr && FAILED(device->CreateQuery(D3DQUERYTYPE_EVENT, &query))) {
+    query = nullptr;
+    return;
+  }
+  query->Issue(D3DISSUE_END);
+  while (query->GetData(nullptr, 0, D3DGETDATA_FLUSH) == S_FALSE) {
+  }
+}
+
+double d3d9_gpu_time_begin(IDirect3DDevice9 *device)
+{
+  gpu_wait_idle(device);
+  return d3d9_time_ms();
+}
+
+void d3d9_gpu_time_end(IDirect3DDevice9 *device, const char *name, const double start_ms)
+{
+  gpu_wait_idle(device);
+  gpu_times().lookup_or_add(name, 0.0) += d3d9_time_ms() - start_ms;
+}
+
+static void gpu_times_print(int frames)
+{
+  Vector<std::pair<double, std::string>> sorted;
+  double total = 0.0;
+  for (const auto item : gpu_times().items()) {
+    sorted.append({item.value, item.key});
+    total += item.value;
+  }
+  std::sort(sorted.begin(), sorted.end(), [](const auto &a, const auto &b) {
+    return a.first > b.first;
+  });
+  printf("d3d9: GPU %.2f ms per frame:", total / frames);
+  for (int i = 0; i < min_ii(sorted.size(), 14); i++) {
+    printf(" %s %.2f,", sorted[i].second.c_str(), sorted[i].first / frames);
+  }
+  printf("\n");
+  gpu_times().clear();
+}
+
 void D3D9Context::begin_frame()
 {
   window_framebuffer_update();
+  frame_start_ms_ = d3d9_time_ms();
 }
 
 void D3D9Context::end_frame()
 {
   /* `Present` must be called outside of a scene. */
   end_scene();
+  D3D9Backend::get()->texture_cache_frame();
+
+  /* `BLENDER_D3D9_FRAMETIME`: print averages of the frame CPU time and work. */
+  static const bool frametime = getenv("BLENDER_D3D9_FRAMETIME") != nullptr;
+  if (frametime) {
+    static double cpu_sum = 0.0;
+    static int frames = 0;
+    cpu_sum += d3d9_time_ms() - frame_start_ms_;
+    if (++frames == 32) {
+      printf("d3d9: frame cpu %.2f ms (setup %.2f, draw calls %.2f, clears %.2f; fb %.2f, state "
+             "%.2f, textures %.2f, constants %.2f, scene %.2f), %.1f draws, "
+             "%.1f readbacks (%s), %.1f KB uploads per frame\n",
+             cpu_sum / frames,
+             d3d9_frame_stats.setup_ms / frames,
+             d3d9_frame_stats.draw_ms / frames,
+             d3d9_frame_stats.clear_ms / frames,
+             d3d9_frame_stats.fb_ms / frames,
+             d3d9_frame_stats.state_ms / frames,
+             d3d9_frame_stats.texture_ms / frames,
+             d3d9_frame_stats.constants_ms / frames,
+             d3d9_frame_stats.scene_ms / frames,
+             float(d3d9_frame_stats.draws) / frames,
+             float(d3d9_frame_stats.readbacks) / frames,
+             d3d9_frame_stats.last_readback,
+             float(d3d9_frame_stats.upload_bytes) / 1024.0f / frames);
+      if (d3d9_gpu_time_enabled()) {
+        gpu_times_print(frames);
+      }
+      printf("d3d9: %.1f textures created, %.1f freed per frame, %u MB texture memory available\n",
+             float(d3d9_frame_stats.textures_created) / frames,
+             float(d3d9_frame_stats.textures_freed) / frames,
+             device->GetAvailableTextureMem() / (1024 * 1024));
+      fflush(stdout);
+      cpu_sum = 0.0;
+      frames = 0;
+      d3d9_frame_stats = {};
+    }
+  }
 }
 
 void D3D9Context::flush()
@@ -198,6 +307,14 @@ void D3D9Context::memory_statistics_get(int *r_total_mem, int *r_free_mem)
 
 bool D3D9Context::draw_setup()
 {
+  const double start_ms = d3d9_time_ms();
+  const bool result = draw_setup_impl();
+  d3d9_frame_stats.setup_ms += d3d9_time_ms() - start_ms;
+  return result;
+}
+
+bool D3D9Context::draw_setup_impl()
+{
   D3D9Shader *sh = static_cast<D3D9Shader *>(shader);
   if (sh == nullptr || !sh->is_valid()) {
     return false;
@@ -208,8 +325,13 @@ bool D3D9Context::draw_setup()
   if (state.active_fb != fb) {
     state.active_fb = fb;
   }
+  d3d9_frame_stats.draws++;
+  double t = d3d9_time_ms();
   fb->apply_state(state.state.blend != GPU_BLEND_NONE);
+  d3d9_frame_stats.fb_ms += d3d9_time_ms() - t;
+  t = d3d9_time_ms();
   state.apply_state();
+  d3d9_frame_stats.state_ms += d3d9_time_ms() - t;
 
   /* Reserved vertex shader constants, see `d3d9_common.hlsl`. */
   int viewport[4];
@@ -277,9 +399,13 @@ bool D3D9Context::draw_setup()
     }
   }
 
+  t = d3d9_time_ms();
   sh->constants_upload(device);
+  d3d9_frame_stats.constants_ms += d3d9_time_ms() - t;
 
+  t = d3d9_time_ms();
   ensure_scene();
+  d3d9_frame_stats.scene_ms += d3d9_time_ms() - t;
   return true;
 }
 
@@ -288,6 +414,7 @@ void D3D9Context::state_invalidate()
   static_cast<D3D9FrameBuffer *>(active_fb)->tag_dirty();
   state_manager->force_state();
   point_sprite_ = -1;
+  flat_color_ = -1;
   if (shader) {
     shader->bind(nullptr);
   }
@@ -377,6 +504,7 @@ void D3D9Context::select_draw_end()
 
   IDirect3DSurface9 *surface = nullptr;
   select_tx_->GetSurfaceLevel(0, &surface);
+  d3d9_frame_stats.readbacks++;
   const HRESULT hr = device->GetRenderTargetData(surface, select_readback_);
   d3d9_release(surface);
   D3DLOCKED_RECT locked;
@@ -430,6 +558,14 @@ void D3D9Context::point_sprite_set(bool enable)
   if (point_sprite_ != int(enable)) {
     device->SetRenderState(D3DRS_POINTSPRITEENABLE, enable ? TRUE : FALSE);
     point_sprite_ = int(enable);
+  }
+}
+
+void D3D9Context::flat_color_set(bool enable)
+{
+  if (flat_color_ != int(enable)) {
+    device->SetRenderState(D3DRS_SHADEMODE, enable ? D3DSHADE_FLAT : D3DSHADE_GOURAUD);
+    flat_color_ = int(enable);
   }
 }
 

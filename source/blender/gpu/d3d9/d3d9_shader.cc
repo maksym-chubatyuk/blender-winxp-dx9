@@ -472,6 +472,10 @@ void D3D9Shader::parse_instance_data(const D3D9ShaderBinary &binary)
       }
       continue;
     }
+    if (STREQ(key, "flat-color")) {
+      flat_color_ = true;
+      continue;
+    }
     if (STREQ(key, "select-output")) {
       select_output_ = true;
       continue;

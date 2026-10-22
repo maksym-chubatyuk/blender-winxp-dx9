@@ -13,6 +13,7 @@
 #include "MEM_guardedalloc.h"
 
 #include "d3d9_backend.hh"
+#include "d3d9_context.hh"
 #include "d3d9_vertex_buffer.hh"
 
 namespace blender::gpu {
@@ -271,6 +272,7 @@ IDirect3DVertexBuffer9 *D3D9VertBuf::buffer_get()
     memory_usage += vbo_size_;
   }
 
+  d3d9_frame_stats.upload_bytes += size;
   void *dst;
   if (SUCCEEDED(vbo_->Lock(0, size, &dst, 0))) {
     if (data_ != nullptr && usage_ != GPU_USAGE_DEVICE_ONLY) {

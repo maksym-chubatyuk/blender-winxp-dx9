@@ -350,6 +350,13 @@ D3D9Texture::~D3D9Texture()
 
 void D3D9Texture::free_resource()
 {
+  if (tex2d_ || cube_ || volume_ || depth_surface_) {
+    d3d9_frame_stats.textures_freed++;
+  }
+  if (tex2d_ && !is_render_target_ && source_ == nullptr) {
+    D3D9Backend::get()->texture_cache_put(tex2d_);
+    tex2d_ = nullptr;
+  }
   d3d9_release(tex2d_);
   d3d9_release(cube_);
   d3d9_release(volume_);
@@ -474,6 +481,7 @@ bool D3D9Texture::ensure_resource(bool render_target)
   const D3DPOOL pool = render_target ? D3DPOOL_DEFAULT : D3DPOOL_MANAGED;
   DWORD usage = render_target ? D3DUSAGE_RENDERTARGET : 0;
   HRESULT hr = E_FAIL;
+  bool from_cache = false;
   if (type_ & GPU_TEXTURE_CUBE) {
     hr = device->CreateCubeTexture(
         device_w_, device_levels_, usage, device_format_.format, pool, &cube_, nullptr);
@@ -490,14 +498,20 @@ bool D3D9Texture::ensure_resource(bool render_target)
                                      nullptr);
   }
   else {
-    hr = device->CreateTexture(device_w_,
-                               device_h_,
-                               device_levels_,
-                               usage,
-                               device_format_.format,
-                               pool,
-                               &tex2d_,
-                               nullptr);
+    from_cache = !render_target;
+    tex2d_ = render_target ? nullptr :
+                             backend->texture_cache_take(
+                                 device_w_, device_h_, device_levels_, device_format_.format);
+    from_cache = tex2d_ != nullptr;
+    hr = tex2d_ ? D3D_OK :
+                  device->CreateTexture(device_w_,
+                                        device_h_,
+                                        device_levels_,
+                                        usage,
+                                        device_format_.format,
+                                        pool,
+                                        &tex2d_,
+                                        nullptr);
   }
   if (FAILED(hr)) {
     CLOG_ERROR(&LOG,
@@ -511,6 +525,33 @@ bool D3D9Texture::ensure_resource(bool render_target)
     return false;
   }
   is_render_target_ = render_target;
+  if (from_cache) {
+    return true;
+  }
+  d3d9_frame_stats.textures_created++;
+  static const bool frametime = getenv("BLENDER_D3D9_FRAMETIME") != nullptr;
+  if (frametime) {
+    printf("d3d9: create texture \"%s\" %dx%d format %d %s from",
+           name_.c_str(),
+           device_w_,
+           device_h_,
+           int(device_format_.format),
+           render_target ? "rt" : "managed");
+    /* Return address candidates: the code addresses found on the stack. */
+    const IMAGE_DOS_HEADER *dos = reinterpret_cast<const IMAGE_DOS_HEADER *>(
+        GetModuleHandleA(nullptr));
+    const IMAGE_NT_HEADERS *nt = reinterpret_cast<const IMAGE_NT_HEADERS *>(
+        reinterpret_cast<const char *>(dos) + dos->e_lfanew);
+    const uintptr_t start = uintptr_t(dos), end = start + nt->OptionalHeader.SizeOfImage;
+    const uintptr_t *sp = static_cast<const uintptr_t *>(__builtin_frame_address(0));
+    for (int i = 0, n = 0; i < 1024 && n < 12; i++) {
+      if (sp[i] >= start && sp[i] < end) {
+        printf(" %x", unsigned(sp[i]));
+        n++;
+      }
+    }
+    printf("\n");
+  }
   return true;
 }
 
@@ -673,6 +714,19 @@ void D3D9Texture::update_sub(int mip,
                              const void *data,
                              uint unpack_row_length)
 {
+  d3d9_frame_stats.upload_bytes += size_t(max_ii(extent[0], 1)) * max_ii(extent[1], 1) *
+                                   max_ii(extent[2], 1) * 4;
+  static const bool frametime = getenv("BLENDER_D3D9_FRAMETIME") != nullptr;
+  if (frametime && extent[0] * extent[1] > 256 * 256) {
+    printf("d3d9: upload %s %dx%d format %d usage %d from %p %p\n",
+           name_.c_str(),
+           extent[0],
+           extent[1],
+           int(format),
+           int(usage_get()),
+           __builtin_return_address(0),
+           __builtin_extract_return_addr(__builtin_return_address(1)));
+  }
   if (source_ || data == nullptr || device_format_.kind == D3D9TexelKind::DEPTH) {
     return;
   }
@@ -824,13 +878,68 @@ void D3D9Texture::update_sub(int offset[3],
   update_sub(0, offset, extent, format, buffer->map(), 0);
 }
 
+bool D3D9Texture::clear_on_device(const double4 &data)
+{
+  /* Render target 2D textures are filled by the device: the viewport textures are cleared every
+   * frame, uploading them is slow. The fill color is 8 bit: only exact values are supported. */
+  if (type_ != GPU_TEXTURE_2D || !(is_render_target_ || (usage_get() & GPU_TEXTURE_USAGE_ATTACHMENT))) {
+    return false;
+  }
+  D3DCOLOR color;
+  if (device_format_.kind == D3D9TexelKind::PACKED_U32) {
+    if (data[0] < 0.0 || data[0] > double(UINT32_MAX)) {
+      return false;
+    }
+    color = D3DCOLOR(uint32_t(data[0]));
+  }
+  else if (ELEM(device_format_.kind,
+                D3D9TexelKind::UNORM8,
+                D3D9TexelKind::HALF,
+                D3D9TexelKind::FLOAT))
+  {
+    uint8_t bytes[4];
+    for (int c = 0; c < 4; c++) {
+      const double v = data[c] * 255.0;
+      if (v < 0.0 || v > 255.0 ||
+          (device_format_.kind != D3D9TexelKind::UNORM8 && v != 0.0 && v != 255.0))
+      {
+        return false;
+      }
+      bytes[c] = uint8_t(v + 0.5);
+    }
+    color = D3DCOLOR_ARGB(bytes[3], bytes[0], bytes[1], bytes[2]);
+  }
+  else {
+    return false;
+  }
+  if (!ensure_resource(true) || tex2d_ == nullptr) {
+    return false;
+  }
+  IDirect3DDevice9 *device = D3D9Backend::get()->device;
+  for (int level = 0; level < device_levels_; level++) {
+    IDirect3DSurface9 *surface = level_surface(level, 0);
+    if (surface == nullptr || FAILED(device->ColorFill(surface, nullptr, color))) {
+      d3d9_release(surface);
+      return false;
+    }
+    d3d9_release(surface);
+  }
+  return true;
+}
+
 void D3D9Texture::clear(double4 data)
 {
   if (source_) {
     source_->clear(data);
     return;
   }
-  if (device_format_.kind == D3D9TexelKind::DEPTH || !ensure_resource(false)) {
+  if (device_format_.kind == D3D9TexelKind::DEPTH) {
+    return;
+  }
+  if (clear_on_device(data)) {
+    return;
+  }
+  if (!ensure_resource(false)) {
     return;
   }
   /* Encode one texel in the host float format and upload it to every level. */
@@ -894,6 +1003,8 @@ void D3D9Texture::read(int mip, eGPUDataFormat format, void *r_data)
       return;
     }
     IDirect3DSurface9 *target = level_surface(mip, 0);
+    d3d9_frame_stats.readbacks++;
+    d3d9_frame_stats.last_readback = name_.c_str();
     const bool ok = target && D3D9_CHECK(device->GetRenderTargetData(target, readable));
     if (target) {
       target->Release();
@@ -986,10 +1097,23 @@ void D3D9Texture::copy_to(Texture *dst_, IndexRange mip_levels)
 {
   D3D9Texture *dst = static_cast<D3D9Texture *>(dst_);
   IDirect3DDevice9 *device = D3D9Backend::get()->device;
+  if (is_depth() || dst->is_depth()) {
+    /* Depth can't go through host memory (it can't be read). Depth surfaces can be copied with
+     * `StretchRect` outside of a scene, when the driver supports it. */
+    if (is_depth() && dst->is_depth() && ensure_resource(true) && dst->ensure_resource(true)) {
+      D3D9Context::get()->end_scene();
+      static bool unsupported = false;
+      if (!unsupported &&
+          FAILED(device->StretchRect(depth_surface_, nullptr, dst->depth_surface_, nullptr, D3DTEXF_NONE)))
+      {
+        CLOG_WARN(&LOG, "Depth copies are not supported by the driver");
+        unsupported = true;
+      }
+    }
+    return;
+  }
   for (const int mip : mip_levels) {
-    if (is_render_target_ && dst->ensure_resource(true) && dst->is_render_target_ &&
-        !is_depth() && !dst->is_depth())
-    {
+    if (is_render_target_ && dst->ensure_resource(true) && dst->is_render_target_) {
       IDirect3DSurface9 *src_surface = surface_get(mip, 0);
       IDirect3DSurface9 *dst_surface = dst->surface_get(mip, 0);
       if (src_surface && dst_surface) {

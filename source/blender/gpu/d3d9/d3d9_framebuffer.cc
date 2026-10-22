@@ -6,6 +6,7 @@
  * \ingroup gpu
  */
 
+#include <cstdio>
 #include <cstring>
 
 #include "BLI_math_base.h"
@@ -270,7 +271,29 @@ static void clear_full_viewport(IDirect3DDevice9 *device,
     device->SetViewport(&vp);
     target->Release();
   }
+  const double gpu_start_ms = d3d9_gpu_time_enabled() ? d3d9_gpu_time_begin(device) : 0.0;
+  const double start_ms = d3d9_time_ms();
   D3D9_CHECK(device->Clear(0, nullptr, flags, color, depth, stencil));
+  d3d9_frame_stats.clear_ms += d3d9_time_ms() - start_ms;
+  if (d3d9_gpu_time_enabled()) {
+    char name[64] = "(clear)";
+    IDirect3DSurface9 *rt = nullptr;
+    device->GetRenderTarget(0, &rt);
+    if (rt) {
+      D3DSURFACE_DESC desc;
+      rt->GetDesc(&desc);
+      snprintf(name,
+               sizeof(name),
+               "(clear %ux%u fmt %d%s%s)",
+               desc.Width,
+               desc.Height,
+               int(desc.Format),
+               (flags & D3DCLEAR_TARGET) ? " color" : "",
+               (flags & D3DCLEAR_ZBUFFER) ? " depth" : "");
+      rt->Release();
+    }
+    d3d9_gpu_time_end(device, name, gpu_start_ms);
+  }
   device->SetViewport(&old_vp);
 }
 
@@ -430,6 +453,8 @@ void D3D9FrameBuffer::read(GPUFrameBufferBits planes,
     surface->Release();
     return;
   }
+  d3d9_frame_stats.readbacks++;
+  d3d9_frame_stats.last_readback = name_;
   const bool ok = D3D9_CHECK(device->GetRenderTargetData(surface, staging));
   surface->Release();
 

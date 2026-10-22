@@ -180,6 +180,11 @@ void GPU_scissor_test(bool enable)
   Context::get()->active_fb->scissor_test_set(enable);
 }
 
+bool GPU_scissor_test_get()
+{
+  return Context::get()->active_fb->scissor_test_get();
+}
+
 void GPU_scissor(int x, int y, int width, int height)
 {
   int scissor_rect[4] = {x, y, width, height};

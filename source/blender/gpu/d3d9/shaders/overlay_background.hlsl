@@ -56,6 +56,15 @@ VertOut vert(VertIn v)
   return o;
 }
 
+#ifdef SIMPLE
+/* `overlay_background_simple`: solid color or linear gradient (computed per vertex). */
+float4 frag(VertOut v) : COLOR0
+{
+  float alpha = tex2D(color_buffer, v.uv).a;
+  float3 bg_col = lerp(v.base_col, color_override.rgb, color_override.a);
+  return float4(bg_col * (1.0 - alpha), (alpha == 1.0) ? 1.0 : 1.0 - alpha);
+}
+#else
 float4 frag(VertOut v) : COLOR0
 {
   float alpha = tex2D(color_buffer, v.uv).a;
@@ -77,3 +86,4 @@ float4 frag(VertOut v) : COLOR0
   color = (v.flags.w > 0.5) ? float4(bg_col, alpha) : color;
   return (v.flags.z > 0.5) ? float4((1.0 - alpha).xxx, 0.0) : color;
 }
+#endif

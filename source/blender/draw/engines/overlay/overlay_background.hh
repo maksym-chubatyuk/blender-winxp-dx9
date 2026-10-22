@@ -10,6 +10,8 @@
 
 #include "DNA_world_types.h"
 
+#include "GPU_capabilities.hh"
+
 #include "draw_cache.hh"
 
 #include "overlay_base.hh"
@@ -90,7 +92,11 @@ class Background : Overlay {
     }
 
     bg_ps_.state_set(pass_state);
-    bg_ps_.shader_set(res.shaders->background_fill.get());
+    /* Shader Model 2.0 hardware evaluates all the background types for every pixel. */
+    const bool simple = !GPU_compute_shader_support() &&
+                        ELEM(background_type, BG_SOLID, BG_GRADIENT);
+    bg_ps_.shader_set(simple ? res.shaders->background_fill_simple.get() :
+                               res.shaders->background_fill.get());
     bg_ps_.bind_ubo(OVERLAY_GLOBALS_SLOT, &res.globals_buf);
     bg_ps_.bind_ubo(DRW_CLIPPING_UBO_SLOT, &res.clip_planes_buf);
     bg_ps_.bind_texture("color_buffer", &res.color_render_tx);

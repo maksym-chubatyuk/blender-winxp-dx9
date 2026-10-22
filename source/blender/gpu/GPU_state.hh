@@ -163,6 +163,7 @@ void GPU_stencil_test(GPUStencilTest test);
 void GPU_provoking_vertex(GPUProvokingVertex vert);
 void GPU_front_facing(bool invert);
 void GPU_scissor_test(bool enable);
+bool GPU_scissor_test_get();
 void GPU_line_smooth(bool enable);
 /**
  * \note By convention, this is set as needed and not reset back to 1.0.

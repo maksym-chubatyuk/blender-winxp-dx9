@@ -146,6 +146,12 @@ class D3D9Shader : public Shader {
   {
     return vertex_pulls_;
   }
+  /** The `COLOR` outputs are flat: the first vertex of the primitive gives the value (D3D9 flat
+   * shading only applies to colors). */
+  bool flat_color() const
+  {
+    return flat_color_;
+  }
   /** The fragments write the select id instead of colors (see #D3D9Context::select_draw_begin). */
   bool select_output() const
   {
@@ -231,6 +237,7 @@ class D3D9Shader : public Shader {
   bool point_sprite_ = false;
   Vector<VertexPull> vertex_pulls_;
   bool select_output_ = false;
+  bool flat_color_ = false;
   int resource_id_stride_ = 1;
 
   /** CPU copy of the constant registers and the dirty register ranges. */

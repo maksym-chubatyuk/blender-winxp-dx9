@@ -10,6 +10,7 @@
 #include "ED_screen_types.hh"
 
 #include "GPU_batch_presets.hh"
+#include "GPU_capabilities.hh"
 #include "GPU_immediate.hh"
 #include "GPU_platform.hh"
 #include "GPU_state.hh"
@@ -111,6 +112,50 @@ static void drawscredge_area(const ScrArea &area, float edge_thickness)
   GPU_batch_draw(batch);
 }
 
+/**
+ * Outline of an editor area (a hollow rounded box in window space). Shader Model 2.0 hardware
+ * (no compute support) only draws the bands along the edges: the widget shader would shade every
+ * pixel of the area, which takes a large part of the frame there.
+ */
+static void draw_area_outline(const rctf &bounds, const float color[4])
+{
+  if (GPU_compute_shader_support()) {
+    ui::draw_roundbox_4fv_ex(&bounds, nullptr, nullptr, 1.0f, color, U.pixelsize, EDITORRADIUS);
+    return;
+  }
+  int old_scissor[4];
+  GPU_scissor_get(old_scissor);
+  const bool old_scissor_test = GPU_scissor_test_get();
+  /* Corner radius, outline and anti-aliasing. */
+  const int margin = int(ceilf(EDITORRADIUS + U.pixelsize)) + 2;
+  const int xmin = int(floorf(bounds.xmin)), ymin = int(floorf(bounds.ymin));
+  const int xmax = int(ceilf(bounds.xmax)), ymax = int(ceilf(bounds.ymax));
+  const rcti bands[4] = {
+      {xmin, xmax, ymin, ymin + margin},
+      {xmin, xmax, ymax - margin, ymax},
+      {xmin, xmin + margin, ymin + margin, ymax - margin},
+      {xmax - margin, xmax, ymin + margin, ymax - margin},
+  };
+  const rcti old_rect = {old_scissor[0],
+                         old_scissor[0] + old_scissor[2],
+                         old_scissor[1],
+                         old_scissor[1] + old_scissor[3]};
+  GPU_scissor_test(true);
+  for (const rcti &band : bands) {
+    rcti rect = band;
+    if (old_scissor_test && !BLI_rcti_isect(&old_rect, &band, &rect)) {
+      continue;
+    }
+    if (BLI_rcti_size_x(&rect) <= 0 || BLI_rcti_size_y(&rect) <= 0) {
+      continue;
+    }
+    GPU_scissor(rect.xmin, rect.ymin, BLI_rcti_size_x(&rect), BLI_rcti_size_y(&rect));
+    ui::draw_roundbox_4fv_ex(&bounds, nullptr, nullptr, 1.0f, color, U.pixelsize, EDITORRADIUS);
+  }
+  GPU_scissor(UNPACK4(old_scissor));
+  GPU_scissor_test(old_scissor_test);
+}
+
 void ED_screen_draw_edges(wmWindow *win)
 {
   bScreen *screen = WM_window_get_active_screen(win);
@@ -210,13 +255,7 @@ void ED_screen_draw_edges(wmWindow *win)
   for (ScrArea &area : screen->areabase) {
     BLI_rctf_rcti_copy(&bounds, &area.totrct);
     BLI_rctf_pad(&bounds, padding, padding);
-    ui::draw_roundbox_4fv_ex(&bounds,
-                             nullptr,
-                             nullptr,
-                             1.0f,
-                             (&area == active_area) ? outline2 : outline1,
-                             U.pixelsize,
-                             EDITORRADIUS);
+    draw_area_outline(bounds, (&area == active_area) ? outline2 : outline1);
   }
 
   GPU_blend(GPU_BLEND_NONE);

@@ -27,6 +27,16 @@ class D3D9Backend : public GPUBackend {
   /** Display format of the adapter (the back buffer format). */
   D3DFORMAT display_format = D3DFMT_X8R8G8B8;
 
+  /**
+   * Recycling of managed 2D textures: UI code creates and frees textures for single draws (icons),
+   * creating and destroying device textures every frame stalls the driver. Textures are reused
+   * once they haven't been used for a few frames (the GPU may still read them).
+   */
+  IDirect3DTexture9 *texture_cache_take(UINT width, UINT height, UINT levels, D3DFORMAT format);
+  void texture_cache_put(IDirect3DTexture9 *texture);
+  /** Called once per frame: ages and trims the cache. */
+  void texture_cache_frame();
+
   /** Optional features, see #capabilities_init. */
   bool supports_separate_alpha_blend = false;
   /** Blending with several render targets bound (not on R300 class hardware). */
@@ -104,6 +114,15 @@ class D3D9Backend : public GPUBackend {
   /** \} */
 
  private:
+  struct CachedTexture {
+    IDirect3DTexture9 *texture;
+    UINT width, height, levels;
+    D3DFORMAT format;
+    uint64_t frame;
+  };
+  Vector<CachedTexture> texture_cache_;
+  uint64_t texture_cache_frame_ = 0;
+
   void platform_init();
   void capabilities_init();
 

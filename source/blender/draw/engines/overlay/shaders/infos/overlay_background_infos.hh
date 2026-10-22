@@ -30,6 +30,13 @@ ADDITIONAL_INFO(overlay_fullscreen)
 ADDITIONAL_INFO(draw_globals)
 GPU_SHADER_CREATE_END()
 
+/* Same shader, for solid colors and linear gradients without vignette: backends without branching
+ * in fragment shaders (Direct3D 9) use a cheaper version. */
+GPU_SHADER_CREATE_INFO(overlay_background_simple)
+DO_STATIC_COMPILATION()
+ADDITIONAL_INFO(overlay_background)
+GPU_SHADER_CREATE_END()
+
 GPU_SHADER_CREATE_INFO(overlay_clipbound)
 DO_STATIC_COMPILATION()
 PUSH_CONSTANT(float4, ucolor)

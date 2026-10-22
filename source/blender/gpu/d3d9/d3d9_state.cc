@@ -6,10 +6,14 @@
  * \ingroup gpu
  */
 
+#include <cstdio>
+#include <cstdlib>
+
 #include "BLI_math_base.h"
 #include "BLI_math_bits.h"
 
 #include "d3d9_backend.hh"
+#include "d3d9_context.hh"
 #include "d3d9_framebuffer.hh"
 #include "d3d9_state.hh"
 #include "d3d9_texture.hh"
@@ -48,7 +52,9 @@ void D3D9StateManager::apply_state()
   }
   this->set_state(this->state);
   this->set_mutable_state(this->mutable_state);
+  const double t = d3d9_time_ms();
   this->texture_bind_apply();
+  d3d9_frame_stats.texture_ms += d3d9_time_ms() - t;
 }
 
 void D3D9StateManager::force_state()
@@ -508,11 +514,31 @@ void D3D9StateManager::texture_bind_apply()
       base = nullptr;
     }
     if (device_textures_[unit] != base) {
+      static const bool frametime = getenv("BLENDER_D3D9_FRAMETIME") != nullptr;
+      const double t = frametime ? d3d9_time_ms() : 0.0;
       device_->SetTexture(unit, base);
       device_textures_[unit] = base;
+      if (frametime && d3d9_time_ms() - t > 1.0) {
+        printf("d3d9: slow SetTexture %.2f ms unit %d %s format %d rt %d %dx%d\n",
+               d3d9_time_ms() - t,
+               unit,
+               tex ? tex->debug_name() : "",
+               tex ? int(tex->device_format().format) : 0,
+               tex ? int(tex->is_render_target()) : 0,
+               tex ? tex->device_width() : 0,
+               tex ? tex->device_height() : 0);
+      }
     }
     if (tex) {
+      static const bool frametime = getenv("BLENDER_D3D9_FRAMETIME") != nullptr;
+      const double t = frametime ? d3d9_time_ms() : 0.0;
       sampler_apply(unit, samplers_[unit]);
+      if (frametime && d3d9_time_ms() - t > 1.0) {
+        printf("d3d9: slow sampler state %.2f ms unit %d %s\n",
+               d3d9_time_ms() - t,
+               unit,
+               tex->debug_name());
+      }
     }
   }
   dirty_textures_ = 0;

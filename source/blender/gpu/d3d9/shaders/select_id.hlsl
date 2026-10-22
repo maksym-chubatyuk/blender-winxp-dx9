@@ -14,6 +14,8 @@
 #include "draw_common.hlsl"
 
 // d3d9-resource-id 11 1
+/* The id of a line is the one of its first vertex (`FLAT` in the GLSL). */
+// d3d9-flat-color
 float4 view_buf[12];
 float vertex_size;
 #ifdef UNIFORM_ID
@@ -32,8 +34,9 @@ struct VertIn {
 struct VertOut {
   float4 position : POSITION;
   float point_size : PSIZE;
-  /* Bytes of the id as the texel colors: B = bits 0-7, G = 8-15, R = 16-23, A = 24-31. */
-  float4 id_color : TEXCOORD0;
+  /* Bytes of the id as the texel colors: B = bits 0-7, G = 8-15, R = 16-23, A = 24-31. Exact in
+   * the 8 bit color interpolators. */
+  float4 id_color : COLOR0;
 };
 
 VertOut vert(VertIn v)

@@ -38,14 +38,6 @@ VertOut vert(VertIn v)
   return o;
 }
 
-float3 linear_to_srgb(float3 c)
-{
-  c = max(c, 0.0);
-  float3 lo = c * 12.92;
-  float3 hi = 1.055 * pow(c, 1.0 / 2.4) - 0.055;
-  return (c < 0.0031308) ? lo : hi;
-}
-
 float4 frag(VertOut v) : COLOR0
 {
   float4 col = tex2D(image_texture, v.uv);
@@ -61,18 +53,18 @@ float4 frag(VertOut v) : COLOR0
   /* Exposure and white balance. The matrix columns are the rows of the HLSL constructor. */
   float4x4 scene_linear_matrix = float4x4(parameters[2], parameters[3], parameters[4], parameters[5]);
   col = mul(col, scene_linear_matrix);
+  float3 lin = max(col.rgb, 0.0);
 
-  col.rgb = linear_to_srgb(col.rgb);
-
-  if (do_overlay_merge > 0.5) {
-    col.rgb = pow(abs(col.rgb), exponent * 2.2);
-    col *= 1.0 - overlay.a;
-    col += overlay;
-    col.rgb = pow(abs(col.rgb), 1.0 / 2.2);
-  }
-  else {
-    col.rgb = pow(abs(col.rgb), exponent);
-  }
+  /* The display gamma (`exponent`) and the overlay merge are done in linear space, then the
+   * gamma and the sRGB encoding are a single power (the 64 instructions of ps_2_0 are slow over
+   * the viewport on R300 hardware). The overlays are stored linear (render targets aren't
+   * encoded) and pre-multiplied. */
+  float merge = do_overlay_merge > 0.5 ? 1.0 : 0.0;
+  float3 merged = lin * (1.0 - overlay.a) + overlay.rgb;
+  lin = lerp(lin, merged, merge);
+  float3 encoded = 1.055 * pow(lin, exponent / 2.4) - 0.055;
+  col.rgb = (lin < 0.0031308) ? lin * 12.92 : encoded;
+  col.a = lerp(col.a, col.a * (1.0 - overlay.a) + overlay.a, merge);
   col.a *= opacity;
   return col;
 }

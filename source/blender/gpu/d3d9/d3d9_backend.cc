@@ -151,6 +151,20 @@ void D3D9Backend::capabilities_init()
 
   supports_separate_alpha_blend = (caps.PrimitiveMiscCaps & D3DPMISCCAPS_SEPARATEALPHABLEND) != 0;
   supports_mrt_blending = (caps.PrimitiveMiscCaps & D3DPMISCCAPS_MRTPOSTPIXELSHADERBLENDING) != 0;
+  if (getenv("BLENDER_D3D9_FRAMETIME")) {
+    auto check = [&](DWORD usage, D3DRESOURCETYPE type, D3DFORMAT format) {
+      return d3d_ && SUCCEEDED(d3d_->CheckDeviceFormat(
+                         D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, display_format, usage, type, format));
+    };
+    printf("d3d9: caps: srgb write back buffer %d, A8R8G8B8 texture %d; srgb read A8R8G8B8 %d; "
+           "fp16 blend %d, A2R10G10B10 rt %d blend %d\n",
+           int(check(D3DUSAGE_RENDERTARGET | D3DUSAGE_QUERY_SRGBWRITE, D3DRTYPE_SURFACE, display_format)),
+           int(check(D3DUSAGE_RENDERTARGET | D3DUSAGE_QUERY_SRGBWRITE, D3DRTYPE_TEXTURE, D3DFMT_A8R8G8B8)),
+           int(check(D3DUSAGE_QUERY_SRGBREAD, D3DRTYPE_TEXTURE, D3DFMT_A8R8G8B8)),
+           int(check(D3DUSAGE_RENDERTARGET | D3DUSAGE_QUERY_POSTPIXELSHADER_BLENDING, D3DRTYPE_TEXTURE, D3DFMT_A16B16G16R16F)),
+           int(check(D3DUSAGE_RENDERTARGET, D3DRTYPE_TEXTURE, D3DFMT_A2R10G10B10)),
+           int(check(D3DUSAGE_RENDERTARGET | D3DUSAGE_QUERY_POSTPIXELSHADER_BLENDING, D3DRTYPE_TEXTURE, D3DFMT_A2R10G10B10)));
+  }
   supports_blend_op = (caps.PrimitiveMiscCaps & D3DPMISCCAPS_BLENDOP) != 0;
   supports_non_pow2 = (caps.TextureCaps & D3DPTEXTURECAPS_POW2) == 0 ||
                       (caps.TextureCaps & D3DPTEXTURECAPS_NONPOW2CONDITIONAL) != 0;
@@ -217,8 +231,50 @@ void D3D9Backend::init_resources()
   compiler_ = MEM_new<D3D9ShaderCompiler>(__func__);
 }
 
+IDirect3DTexture9 *D3D9Backend::texture_cache_take(UINT width,
+                                                  UINT height,
+                                                  UINT levels,
+                                                  D3DFORMAT format)
+{
+  for (int i = 0; i < texture_cache_.size(); i++) {
+    const CachedTexture &cached = texture_cache_[i];
+    if (cached.width == width && cached.height == height && cached.levels == levels &&
+        cached.format == format && cached.frame + 4 <= texture_cache_frame_)
+    {
+      IDirect3DTexture9 *texture = cached.texture;
+      texture_cache_.remove_and_reorder(i);
+      return texture;
+    }
+  }
+  return nullptr;
+}
+
+void D3D9Backend::texture_cache_put(IDirect3DTexture9 *texture)
+{
+  D3DSURFACE_DESC desc;
+  texture->GetLevelDesc(0, &desc);
+  texture_cache_.append(
+      {texture, desc.Width, desc.Height, texture->GetLevelCount(), desc.Format, texture_cache_frame_});
+}
+
+void D3D9Backend::texture_cache_frame()
+{
+  texture_cache_frame_++;
+  /* Release the textures unused for a while, and the oldest ones beyond a count. */
+  for (int i = texture_cache_.size() - 1; i >= 0; i--) {
+    if (texture_cache_[i].frame + 600 < texture_cache_frame_ || texture_cache_.size() > 256) {
+      texture_cache_[i].texture->Release();
+      texture_cache_.remove_and_reorder(i);
+    }
+  }
+}
+
 void D3D9Backend::delete_resources()
 {
+  for (CachedTexture &cached : texture_cache_) {
+    cached.texture->Release();
+  }
+  texture_cache_.clear();
   MEM_delete(compiler_);
   compiler_ = nullptr;
   d3d9_release(vertex_id_buffer_);

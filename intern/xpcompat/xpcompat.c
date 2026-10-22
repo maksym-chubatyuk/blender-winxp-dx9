@@ -23,6 +23,8 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
+#include <tlhelp32.h>
+
 #include <commctrl.h>
 #include <objbase.h>
 #include <shlobj.h>
@@ -367,3 +369,156 @@ __attribute__((constructor)) static void xp_watchdog_init(void)
 }
 
 /** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Timer resolution
+ *
+ * `Sleep()` has the granularity of the system timer, 10 to 15.6 ms by default on XP: the main
+ * loop's 5 ms idle sleep (`BLI_time_sleep_precise_us`, without high resolution waitable timers
+ * before Windows 10) would last 15 ms and limit the redraw rate. Use a 1 ms resolution.
+ * \{ */
+
+__attribute__((constructor)) static void xp_timer_resolution_init(void)
+{
+  HMODULE winmm = LoadLibraryA("winmm.dll");
+  if (winmm) {
+    typedef UINT(WINAPI * TimeBeginPeriodFn)(UINT);
+    TimeBeginPeriodFn time_begin_period = (TimeBeginPeriodFn)(void *)GetProcAddress(
+        winmm, "timeBeginPeriod");
+    if (time_begin_period) {
+      time_begin_period(1);
+    }
+  }
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Sampling profiler
+ *
+ * `XP_PROFILE=<milliseconds>`: samples the main thread at that interval and appends to
+ * `xp_profile.txt` (current directory) one line per sample: the instruction pointer then the first
+ * stack values pointing into the executable's code (return address candidates). The loaded
+ * modules are listed at each flush, to attribute the samples outside of the executable.
+ * \{ */
+
+#define XP_PROFILE_CALLERS 6
+#define XP_PROFILE_BUFFER (1 << 16)
+
+static HANDLE xp_profile_main_thread = NULL;
+static DWORD xp_profile_interval_ms = 0;
+
+static void xp_profile_write_modules(FILE *f)
+{
+  HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, GetCurrentProcessId());
+  if (snapshot == INVALID_HANDLE_VALUE) {
+    return;
+  }
+  MODULEENTRY32 entry;
+  entry.dwSize = sizeof(entry);
+  for (BOOL ok = Module32First(snapshot, &entry); ok; ok = Module32Next(snapshot, &entry)) {
+    fprintf(f,
+            "module 0x%08lx 0x%08lx %s\n",
+            (unsigned long)(DWORD_PTR)entry.modBaseAddr,
+            (unsigned long)entry.modBaseSize,
+            entry.szModule);
+  }
+  CloseHandle(snapshot);
+}
+
+static DWORD WINAPI xp_profile_thread(LPVOID unused)
+{
+  (void)unused;
+  const IMAGE_DOS_HEADER *dos = (const IMAGE_DOS_HEADER *)GetModuleHandleA(NULL);
+  const IMAGE_NT_HEADERS *nt = (const IMAGE_NT_HEADERS *)((const char *)dos + dos->e_lfanew);
+  const DWORD image_start = (DWORD)dos;
+  const DWORD image_end = image_start + nt->OptionalHeader.SizeOfImage;
+
+  /* Millisecond timer resolution (the default is 10 to 15 ms). */
+  HMODULE winmm = LoadLibraryA("winmm.dll");
+  if (winmm) {
+    typedef UINT(WINAPI * TimeBeginPeriodFn)(UINT);
+    TimeBeginPeriodFn time_begin_period = (TimeBeginPeriodFn)(void *)GetProcAddress(
+        winmm, "timeBeginPeriod");
+    if (time_begin_period) {
+      time_begin_period(1);
+    }
+  }
+
+  static char buffer[XP_PROFILE_BUFFER];
+  size_t len = 0;
+  DWORD last_flush = GetTickCount();
+  FILE *f = fopen("xp_profile.txt", "w");
+  if (f) {
+    fclose(f);
+  }
+  for (;;) {
+    Sleep(xp_profile_interval_ms);
+    CONTEXT ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.ContextFlags = CONTEXT_FULL;
+    DWORD callers[XP_PROFILE_CALLERS] = {0};
+    if (SuspendThread(xp_profile_main_thread) == (DWORD)-1) {
+      continue;
+    }
+    const BOOL ok = GetThreadContext(xp_profile_main_thread, &ctx);
+    if (ok) {
+      MEMORY_BASIC_INFORMATION mbi;
+      if (VirtualQuery((LPCVOID)ctx.Esp, &mbi, sizeof(mbi))) {
+        const DWORD *sp = (const DWORD *)ctx.Esp;
+        const DWORD *end = (const DWORD *)((const char *)mbi.BaseAddress + mbi.RegionSize);
+        for (int n = 0; sp < end && n < XP_PROFILE_CALLERS; sp++) {
+          if (*sp >= image_start && *sp < image_end) {
+            callers[n++] = *sp;
+          }
+        }
+      }
+    }
+    ResumeThread(xp_profile_main_thread);
+    if (!ok) {
+      continue;
+    }
+    if (len + 128 < sizeof(buffer)) {
+      len += (size_t)sprintf(buffer + len, "s %lx", (unsigned long)ctx.Eip);
+      for (int n = 0; n < XP_PROFILE_CALLERS; n++) {
+        len += (size_t)sprintf(buffer + len, " %lx", (unsigned long)callers[n]);
+      }
+      buffer[len++] = '\n';
+    }
+    const DWORD now = GetTickCount();
+    if (now - last_flush > 3000 || len + 128 >= sizeof(buffer)) {
+      f = fopen("xp_profile.txt", "a");
+      if (f) {
+        fwrite(buffer, 1, len, f);
+        xp_profile_write_modules(f);
+        fclose(f);
+      }
+      len = 0;
+      last_flush = now;
+    }
+  }
+  return 0;
+}
+
+__attribute__((constructor)) static void xp_profile_init(void)
+{
+  char value[16];
+  if (!GetEnvironmentVariableA("XP_PROFILE", value, sizeof(value))) {
+    return;
+  }
+  xp_profile_interval_ms = (DWORD)atoi(value);
+  if (xp_profile_interval_ms == 0) {
+    return;
+  }
+  DuplicateHandle(GetCurrentProcess(),
+                  GetCurrentThread(),
+                  GetCurrentProcess(),
+                  &xp_profile_main_thread,
+                  THREAD_ALL_ACCESS,
+                  FALSE,
+                  0);
+  CreateThread(NULL, 0, xp_profile_thread, NULL, 0, NULL);
+}
+
+/** \} */
+

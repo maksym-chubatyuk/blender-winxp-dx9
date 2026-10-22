@@ -74,6 +74,11 @@ struct VertIn {
 struct VertOut {
   float4 position : POSITION;
   float2 uv : TEXCOORD0;
+  /* Neighbors: right, left, up, down (interpolated, the pixel shader is the expensive part). */
+  float2 uv_right : TEXCOORD1;
+  float2 uv_left : TEXCOORD2;
+  float2 uv_up : TEXCOORD3;
+  float2 uv_down : TEXCOORD4;
 };
 
 VertOut vert(VertIn v)
@@ -82,6 +87,11 @@ VertOut vert(VertIn v)
   float2 pos = drw_fullscreen_pos(v.vertex_id);
   o.position = gpu_position(float4(pos, 1.0, 1.0));
   o.uv = pos * 0.5 + 0.5;
+  float2 ofs = uniform_buf__97.zw;
+  o.uv_right = o.uv + float2(ofs.x, 0.0);
+  o.uv_left = o.uv - float2(ofs.x, 0.0);
+  o.uv_up = o.uv + float2(0.0, ofs.y);
+  o.uv_down = o.uv - float2(0.0, ofs.y);
   return o;
 }
 
@@ -93,30 +103,25 @@ struct FragOut {
 FragOut frag(VertOut v)
 {
   FragOut o;
-  float2 ofs = uniform_buf__97.zw;
   float ref = tex2D(outline_id_tx, v.uv).r;
-  float4 ids = float4(tex2D(outline_id_tx, v.uv + float2(ofs.x, 0.0)).r,
-                      tex2D(outline_id_tx, v.uv - float2(ofs.x, 0.0)).r,
-                      tex2D(outline_id_tx, v.uv + float2(0.0, ofs.y)).r,
-                      tex2D(outline_id_tx, v.uv - float2(0.0, ofs.y)).r);
-  float4 edges = (ids != ref) ? 1.0 : 0.0;
-  if (is_xray_wires > 0.5) {
-    edges.yw = 0.0;
-  }
-  /* Make the outline bleed on the background: take the first neighbor id. */
-  float ref_col = ref;
-  ref_col = (ref_col == 0.0) ? ids.x : ref_col;
-  ref_col = (ref_col == 0.0) ? ids.y : ref_col;
-  ref_col = (ref_col == 0.0) ? ids.z : ref_col;
-  ref_col = (ref_col == 0.0) ? ids.w : ref_col;
-
+  float4 ids = float4(tex2D(outline_id_tx, v.uv_right).r,
+                      tex2D(outline_id_tx, v.uv_left).r,
+                      tex2D(outline_id_tx, v.uv_up).r,
+                      tex2D(outline_id_tx, v.uv_down).r);
+  /* The ids are integers: a difference saturates to 1. */
+  float4 edges = saturate(abs(ids - ref));
+  /* X-ray wires: only the horizontal neighbors. */
+  edges.yw *= 1.0 - is_xray_wires;
   float edge_count = dot(edges, 1.0);
-  clip((edge_count > 0.5 && edge_count < 3.5) ? 1.0 : -1.0);
+  clip(min(edge_count - 0.5, 3.5 - edge_count));
 
-  float color_id = floor(ref_col / 16384.0);
-  float4 color = (color_id > 0.5 && color_id < 1.5) ? uniform_buf__2[1] :
-                 (color_id > 2.5) ? uniform_buf__2[0] : uniform_buf__2[4];
-  o.color = (ref_col == 0.0) ? 0.0 : color * (254.0 / 255.0);
+  /* Make the outline bleed on the background: take a neighbor id (the largest). */
+  float ref_col = ref > 0.0 ? ref : max(max(ids.x, ids.y), max(ids.z, ids.w));
+  /* Color id: transform 0, selected 1, active 3. */
+  float color_id = floor(ref_col * (1.0 / 16384.0));
+  float4 color = lerp(uniform_buf__2[4], uniform_buf__2[1], saturate(color_id));
+  color = lerp(color, uniform_buf__2[0], saturate(color_id - 2.0));
+  o.color = color * (254.0 / 255.0);
   o.line_output = float4(0.0, 0.0, 0.0, 0.0);
   return o;
 }
