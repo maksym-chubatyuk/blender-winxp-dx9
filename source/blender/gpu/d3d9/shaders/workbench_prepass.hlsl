@@ -3,11 +3,13 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
 /**
- * Workbench opaque mesh pre-pass (`workbench_prepass.bsl.hh`): fills the G-buffer.
+ * Workbench mesh pre-pass (`workbench_prepass.bsl.hh`): fills the G-buffer. Defines:
+ * TRANSPARENT (X-ray and transparent materials: lit color with alpha), FLAT (no lighting).
  *
  * D3D9 differences: the material buffer is 8 bit (multiple render targets need the same bit
  * depth), so the packed roughness/metallic pair is stored divided by 255. No back-face normal
- * flipping (ps_2_0 has no `VFACE`).
+ * flipping (ps_2_0 has no `VFACE`). Transparent surfaces are alpha blended without order
+ * independence (R300 can't blend floating point targets), with diffuse lighting only.
  */
 
 #include "d3d9_common.hlsl"
@@ -34,7 +36,7 @@ struct VertOut {
   float4 position : POSITION;
   float3 normal : TEXCOORD0;
   float3 color : TEXCOORD1;
-  float3 data : TEXCOORD2; /* roughness, metallic, object id */
+  float3 data : TEXCOORD2; /* roughness, metallic, object id (alpha when TRANSPARENT) */
 };
 
 VertOut vert(VertIn v)
@@ -46,8 +48,41 @@ VertOut vert(VertIn v)
   o.normal = drw_mat_mul3(view_buf, DRW_VIEWMAT, drw_normal_object_to_world(v.nor));
   o.color = (wb_material[0].r == -1.0) ? v.ac.rgb : wb_material[0].rgb;
   o.data = float3(wb_material[1].x, wb_material[0].w, fmod(wb_resource_id.x, 65536.0) + 1.0);
+#ifdef TRANSPARENT
+  o.data.z = wb_material[1].y;
+#endif
   return o;
 }
+
+#ifdef TRANSPARENT
+/* WorldData, the integers are cavity_sample_start/end, matcap_orientation, use_specular. */
+// d3d9-ubo world_data ffff ffff ffff ffff ffff ffff ffff ffff ffff ffff ffff ffff ffff ffff ffff ffff ffff iiff ffff ffff ibfi ffff
+float4 world_data__4[13]; /* lights[4] (direction, specular, diffuse + wrap), ambient. */
+float4 world_data__20; /* matcap_orientation, use_specular, xray_alpha. */
+
+#  define LIGHT_DIR(i) world_data__4[(i) * 3].xyz
+#  define LIGHT_DIFF(i) world_data__4[(i) * 3 + 2]
+#  define AMBIENT world_data__4[12].rgb
+
+float4 frag(VertOut v) : COLOR0
+{
+  float alpha = v.data.z * world_data__20.z;
+#  ifdef FLAT
+  return float4(v.color, alpha);
+#  else
+  float3 N = normalize(v.normal);
+  float4 wrap = float4(LIGHT_DIFF(0).a, LIGHT_DIFF(1).a, LIGHT_DIFF(2).a, LIGHT_DIFF(3).a);
+  float4 diff_NL = float4(
+      dot(LIGHT_DIR(0), N), dot(LIGHT_DIR(1), N), dot(LIGHT_DIR(2), N), dot(LIGHT_DIR(3), N));
+  float4 w_1 = wrap + 1.0;
+  float4 diff_light = saturate((diff_NL + wrap) / (w_1 * w_1));
+  float3 diffuse_light = AMBIENT + diff_light.x * LIGHT_DIFF(0).rgb +
+                         diff_light.y * LIGHT_DIFF(1).rgb + diff_light.z * LIGHT_DIFF(2).rgb +
+                         diff_light.w * LIGHT_DIFF(3).rgb;
+  return float4(diffuse_light * v.color, alpha);
+#  endif
+}
+#else
 
 struct FragOut {
   float4 material : COLOR0;
@@ -66,3 +101,4 @@ FragOut frag(VertOut v)
   o.object_id = v.data.zzzz;
   return o;
 }
+#endif

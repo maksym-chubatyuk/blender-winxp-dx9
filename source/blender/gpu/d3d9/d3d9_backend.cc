@@ -179,6 +179,14 @@ void D3D9Backend::capabilities_init()
   GCaps.mem_stats_support = true;
   GCaps.geometry_shader_support = false;
   GCaps.compute_shader_support = false;
+  GCaps.float_blending_support = d3d_ && SUCCEEDED(d3d_->CheckDeviceFormat(
+                                             D3DADAPTER_DEFAULT,
+                                             D3DDEVTYPE_HAL,
+                                             display_format,
+                                             D3DUSAGE_RENDERTARGET |
+                                                 D3DUSAGE_QUERY_POSTPIXELSHADER_BLENDING,
+                                             D3DRTYPE_TEXTURE,
+                                             D3DFMT_A16B16G16R16F));
   GCaps.hdr_viewport_support = false;
   GCaps.stencil_export_support = false;
   GCaps.max_parallel_compilations = 0;

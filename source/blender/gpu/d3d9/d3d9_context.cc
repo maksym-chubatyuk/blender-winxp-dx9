@@ -220,13 +220,18 @@ bool D3D9Context::draw_setup()
   static const bool trace = getenv("BLENDER_D3D9_TRACE") != nullptr;
   if (trace) {
     const float4 *ps = sh->ps_constants_get();
-    printf("draw %s fb=%s vp=(%d %d %d %d) blend=%d depth=%d write=%d ps0=(%.3f %.3f %.3f %.3f)\n",
+    printf("draw %s fb=%s vp=(%d %d %d %d) blend=%d depth=%d write=%d cull=%d invert=%d "
+           "flipped=%d stencil=%d ps0=(%.3f %.3f %.3f %.3f)\n",
            sh->name_get().c_str(),
            fb->name_get(),
            UNPACK4(viewport),
            int(state.state.blend),
            int(state.state.depth_test),
            int(state.state.write_mask),
+           int(state.state.culling_test),
+           int(state.state.invert_facing),
+           int(fb->is_flipped()),
+           int(state.state.stencil_test),
            ps ? ps->x : -1.0f,
            ps ? ps->y : -1.0f,
            ps ? ps->z : -1.0f,

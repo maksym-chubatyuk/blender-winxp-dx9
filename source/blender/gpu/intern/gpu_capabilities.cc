@@ -159,6 +159,11 @@ bool GPU_compute_shader_support()
   return GCaps.compute_shader_support;
 }
 
+bool GPU_float_blending_support()
+{
+  return GCaps.float_blending_support;
+}
+
 bool GPU_geometry_shader_support()
 {
   return GCaps.geometry_shader_support;

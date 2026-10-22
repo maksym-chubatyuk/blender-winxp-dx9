@@ -127,6 +127,13 @@ DRWData **GPU_viewport_data_get(GPUViewport *viewport)
   return &viewport->draw_data;
 }
 
+/** The render color is blended into: an 8 bit format on hardware without float blending. */
+static gpu::TextureFormat viewport_color_format()
+{
+  return GPU_float_blending_support() ? gpu::TextureFormat::SFLOAT_16_16_16_16 :
+                                        gpu::TextureFormat::UNORM_8_8_8_8;
+}
+
 static void gpu_viewport_textures_create(GPUViewport *viewport)
 {
   int *size = viewport->size;
@@ -140,7 +147,7 @@ static void gpu_viewport_textures_create(GPUViewport *viewport)
     viewport->color_render_tx[0] = GPU_texture_create_2d("dtxl_color",
                                                          UNPACK2(size),
                                                          1,
-                                                         gpu::TextureFormat::SFLOAT_16_16_16_16,
+                                                         viewport_color_format(),
                                                          usage | GPU_TEXTURE_USAGE_SHADER_WRITE,
                                                          nullptr);
     viewport->color_overlay_tx[0] = GPU_texture_create_2d(
@@ -154,7 +161,7 @@ static void gpu_viewport_textures_create(GPUViewport *viewport)
     viewport->color_render_tx[1] = GPU_texture_create_2d("dtxl_color_stereo",
                                                          UNPACK2(size),
                                                          1,
-                                                         gpu::TextureFormat::SFLOAT_16_16_16_16,
+                                                         viewport_color_format(),
                                                          usage | GPU_TEXTURE_USAGE_SHADER_WRITE,
                                                          nullptr);
     viewport->color_overlay_tx[1] = GPU_texture_create_2d("dtxl_color_overlay_stereo",

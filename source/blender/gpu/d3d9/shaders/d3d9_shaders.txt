@@ -63,3 +63,7 @@ overlay_extra_wire                             overlay_extra_wire.hlsl
 overlay_extra_wire_object                      overlay_extra_wire.hlsl OBJECT_WIRE
 overlay_extra_groundline                       overlay_extra_groundline.hlsl
 overlay_wireframe                              overlay_wireframe.hlsl
+workbench_prepass_mesh_transparent_studio_material_no_clip   workbench_prepass.hlsl TRANSPARENT
+workbench_prepass_mesh_transparent_flat_material_no_clip     workbench_prepass.hlsl TRANSPARENT FLAT
+workbench_prepass_mesh_transparent_studio_material_clip      workbench_prepass.hlsl TRANSPARENT
+workbench_prepass_mesh_transparent_flat_material_clip        workbench_prepass.hlsl TRANSPARENT FLAT

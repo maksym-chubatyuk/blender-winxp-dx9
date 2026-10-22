@@ -244,7 +244,11 @@ bool OpaquePass::is_empty() const
 
 void TransparentPass::sync(const SceneState &scene_state, SceneResources &resources)
 {
-  DRWState state = DRW_STATE_WRITE_COLOR | DRW_STATE_DEPTH_LESS_EQUAL | DRW_STATE_BLEND_OIT |
+  /* Shader Model 2.0 hardware can't blend floating point targets: no order independent
+   * transparency, the surfaces are alpha blended on the color directly (see #draw). */
+  const bool use_oit = GPU_compute_shader_support();
+  DRWState state = DRW_STATE_WRITE_COLOR | DRW_STATE_DEPTH_LESS_EQUAL |
+                   (use_oit ? DRW_STATE_BLEND_OIT : DRW_STATE_BLEND_ALPHA) |
                    scene_state.cull_state;
 
   bool clip = scene_state.clip_planes.size() > 0;
@@ -253,11 +257,15 @@ void TransparentPass::sync(const SceneState &scene_state, SceneResources &resour
       resources, state | DRW_STATE_STENCIL_NEQUAL, scene_state.clip_planes.size());
   accumulation_ps_.state_stencil(
       uint8_t(StencilBits::OBJECT), 0xFF, uint8_t(StencilBits::OBJECT_IN_FRONT));
-  accumulation_ps_.clear_color(float4(0.0f, 0.0f, 0.0f, 1.0f));
+  if (use_oit) {
+    accumulation_ps_.clear_color(float4(0.0f, 0.0f, 0.0f, 1.0f));
+  }
   accumulation_ps_.init_subpasses(ePipelineType::TRANSPARENT, scene_state.lighting_type, clip);
 
   accumulation_in_front_ps_.init_pass(resources, state, scene_state.clip_planes.size());
-  accumulation_in_front_ps_.clear_color(float4(0.0f, 0.0f, 0.0f, 1.0f));
+  if (use_oit) {
+    accumulation_in_front_ps_.clear_color(float4(0.0f, 0.0f, 0.0f, 1.0f));
+  }
   accumulation_in_front_ps_.init_subpasses(
       ePipelineType::TRANSPARENT, scene_state.lighting_type, clip);
 
@@ -275,6 +283,22 @@ void TransparentPass::draw(Manager &manager,
                            int2 resolution)
 {
   if (is_empty()) {
+    return;
+  }
+  if (!GPU_compute_shader_support()) {
+    /* No order independent transparency, see #sync. */
+    if (!accumulation_ps_.is_empty()) {
+      transparent_fb.ensure(GPU_ATTACHMENT_TEXTURE(resources.depth_tx),
+                            GPU_ATTACHMENT_TEXTURE(resources.color_tx));
+      transparent_fb.bind();
+      manager.submit(accumulation_ps_, view);
+    }
+    if (!accumulation_in_front_ps_.is_empty()) {
+      transparent_fb.ensure(GPU_ATTACHMENT_TEXTURE(resources.depth_in_front_tx),
+                            GPU_ATTACHMENT_TEXTURE(resources.color_tx));
+      transparent_fb.bind();
+      manager.submit(accumulation_in_front_ps_, view);
+    }
     return;
   }
   accumulation_tx.acquire_2d(resolution,

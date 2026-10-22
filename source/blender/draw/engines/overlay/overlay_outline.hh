@@ -15,6 +15,8 @@
 
 #include "DNA_userdef_types.h"
 
+#include "GPU_capabilities.hh"
+
 namespace blender::draw::overlay {
 
 /**
@@ -154,7 +156,9 @@ class Outline : Overlay {
             res, *prepass_gpencil_ps_, state.scene, ob_ref.object, manager.unique_handle(ob_ref));
         break;
       case OB_MESH:
-        if (state.xray_enabled_and_not_wire) {
+        /* Without storage buffer reads in shaders the edge detection batch (lines with
+         * adjacency) can't be drawn: use the surface, its silhouette is the outline. */
+        if (state.xray_enabled_and_not_wire && GPU_max_shader_storage_buffer_bindings() > 0) {
           geom = DRW_cache_mesh_edge_detection_get(ob_ref.object, nullptr);
           prepass_wire_ps_->draw_expand(geom, GPU_PRIM_LINES, 1, 1, manager.unique_handle(ob_ref));
         }
