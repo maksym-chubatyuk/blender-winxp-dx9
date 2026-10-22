@@ -352,9 +352,10 @@ void D3D9StateManager::set_culling(const GPUFaceCullTest test, const bool invert
     device_->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
     return;
   }
-  /* OpenGL front faces are counter-clockwise in a Y up window, so they are clockwise in the Y down
-   * D3D window. Flipped render targets swap the winding again. */
-  const bool front_is_cw = (!invert_facing) != current_flipped_;
+  /* D3D9 decides the winding after the viewport transform: with the same clip space as OpenGL,
+   * front faces are counter-clockwise like in OpenGL. The Y flip of off-screen targets makes them
+   * clockwise. */
+  const bool front_is_cw = invert_facing != current_flipped_;
   const bool cull_cw = (test == GPU_CULL_FRONT) ? front_is_cw : !front_is_cw;
   device_->SetRenderState(D3DRS_CULLMODE, cull_cw ? D3DCULL_CW : D3DCULL_CCW);
 }

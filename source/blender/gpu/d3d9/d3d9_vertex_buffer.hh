@@ -64,6 +64,11 @@ class D3D9VertBuf : public VertBuf {
    * failure). Kept until the vertices, the indices or the range change.
    */
   IDirect3DVertexBuffer9 *deindexed_get(D3D9IndexBuf &ib, uint start, uint count);
+  /** Incremented when the device data changes. */
+  uint32_t version_get() const
+  {
+    return version_;
+  }
   /** Host data, null once a static buffer is uploaded. */
   const uchar *host_data_get() const
   {

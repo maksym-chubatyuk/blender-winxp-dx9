@@ -400,7 +400,7 @@ static std::string instance_annotations(const std::string &source)
   std::istringstream lines(source);
   std::string line;
   while (std::getline(lines, line)) {
-    for (const char *key : {"// d3d9-instance ", "// d3d9-resource-id ", "// d3d9-point-sprite", "// d3d9-vertex-pull ", "// d3d9-select-output", "// d3d9-flat-color", "// d3d9-point-quads"}) {
+    for (const char *key : {"// d3d9-instance ", "// d3d9-resource-id ", "// d3d9-point-sprite", "// d3d9-vertex-pull ", "// d3d9-select-output", "// d3d9-flat-color", "// d3d9-point-quads", "// d3d9-lines-adjacency", "// d3d9-points-as-line-strip"}) {
       const size_t pos = line.find(key);
       if (pos == std::string::npos) {
         continue;

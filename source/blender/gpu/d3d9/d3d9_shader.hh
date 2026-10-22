@@ -131,6 +131,16 @@ class D3D9Shader : public Shader {
   {
     return point_sprite_;
   }
+  /** Draws lines with adjacency as lines of the 4 positions (`d3d9-lines-adjacency`). */
+  bool lines_adjacency() const
+  {
+    return lines_adjacency_;
+  }
+  /** Draws point lists as line strips (`d3d9-points-as-line-strip`). */
+  bool points_as_line_strip() const
+  {
+    return points_as_line_strip_;
+  }
   /**
    * Storage buffer read per vertex (`d3d9-vertex-pull <slot> <stride> <location> <types>`): its
    * columns are bound to the inputs `TEXCOORD<location>` and up. Types: `f` float4 (16 bytes), `c`
@@ -244,6 +254,8 @@ class D3D9Shader : public Shader {
   /** Storage buffer slot of the resource ids, and number of words per instance. */
   int resource_id_slot_ = -1;
   bool point_sprite_ = false;
+  bool lines_adjacency_ = false;
+  bool points_as_line_strip_ = false;
   Vector<VertexPull> vertex_pulls_;
   bool select_output_ = false;
   bool flat_color_ = false;

@@ -81,3 +81,29 @@ select_id_flat                                 select_id.hlsl
 select_id_uniform                              select_id.hlsl UNIFORM_ID
 overlay_background_simple                      overlay_background.hlsl SIMPLE
 gpu_shader_keyframe_shape                      gpu_shader_keyframe_shape.hlsl
+
+overlay_armature_shape_solid                   overlay_armature_shape.hlsl SOLID
+overlay_armature_shape_solid_selectable        overlay_armature_shape.hlsl SOLID SELECT
+overlay_armature_shape_outline                 overlay_armature_shape.hlsl OUTLINE
+overlay_armature_shape_outline_selectable      overlay_armature_shape.hlsl OUTLINE SELECT
+overlay_armature_shape_wire                    overlay_armature_shape.hlsl WIRE
+overlay_armature_shape_wire_selectable         overlay_armature_shape.hlsl WIRE SELECT
+overlay_armature_shape_wire_strip              overlay_armature_shape.hlsl WIRE
+overlay_armature_shape_wire_strip_selectable   overlay_armature_shape.hlsl WIRE SELECT
+overlay_armature_sphere_solid                  overlay_armature_sphere.hlsl SOLID
+overlay_armature_sphere_solid_selectable       overlay_armature_sphere.hlsl SOLID SELECT
+overlay_armature_sphere_outline                overlay_armature_sphere.hlsl OUTLINE
+overlay_armature_sphere_outline_selectable     overlay_armature_sphere.hlsl OUTLINE SELECT
+overlay_armature_stick                         overlay_armature_stick.hlsl
+overlay_armature_stick_selectable              overlay_armature_stick.hlsl SELECT
+overlay_armature_envelope_solid                overlay_armature_envelope.hlsl
+overlay_armature_envelope_solid_selectable     overlay_armature_envelope.hlsl SELECT
+overlay_armature_wire                          overlay_armature_wire.hlsl
+
+overlay_paint_weight                           overlay_paint.hlsl WEIGHT
+overlay_paint_weight_fake_shading              overlay_paint.hlsl WEIGHT FAKE_SHADING
+overlay_paint_face                             overlay_paint.hlsl FACE
+overlay_paint_wire                             overlay_paint.hlsl WIRE
+overlay_paint_point                            overlay_paint.hlsl POINT
+overlay_motion_path_line                       overlay_motion_path.hlsl LINE
+overlay_motion_path_point                      overlay_motion_path.hlsl POINT

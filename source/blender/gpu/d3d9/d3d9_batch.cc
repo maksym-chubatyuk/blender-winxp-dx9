@@ -63,6 +63,108 @@ bool d3d9_primitive(GPUPrimType prim_type,
   return r_prim_len > 0;
 }
 
+D3D9Batch::~D3D9Batch()
+{
+  d3d9_release(adjacency_vbo_);
+}
+
+bool D3D9Batch::bind_lines_adjacency()
+{
+  D3D9VertBuf *vbo = static_cast<D3D9VertBuf *>(verts[0]);
+  if (vbo == nullptr || vbo->format.attr_len == 0 || vbo->buffer_get() == nullptr) {
+    return false;
+  }
+  const D3D9VertexLayout &layout = vbo->layout_get();
+  const uint8_t pos_type = layout.attrs[0].type;
+  if (pos_type < D3DDECLTYPE_FLOAT2 || pos_type > D3DDECLTYPE_FLOAT4) {
+    return false;
+  }
+  D3D9IndexBuf *ib = static_cast<D3D9IndexBuf *>(elem);
+  D3D9IndexBuf *source_ib = ib ? ib->source_get() : nullptr;
+  const uint32_t ib_version = source_ib ? source_ib->version_get() : 0;
+  struct AdjacencyVert {
+    float3 pos[4];
+    float end;
+  };
+  if (adjacency_vbo_ == nullptr || adjacency_vert_ != vbo ||
+      adjacency_vert_version_ != vbo->version_get() || adjacency_ib_ != source_ib ||
+      adjacency_ib_version_ != ib_version)
+  {
+    const Span<uint32_t> indices = source_ib ? source_ib->host_indices_get() : Span<uint32_t>();
+    const uint prim_len = (ib ? uint(indices.size()) : vbo->vertex_len) / 4;
+    if (prim_len == 0) {
+      return false;
+    }
+    const uint size = prim_len * 2 * sizeof(AdjacencyVert);
+    IDirect3DDevice9 *device = D3D9Context::get()->device;
+    if (adjacency_vbo_ == nullptr || adjacency_size_ < size) {
+      d3d9_release(adjacency_vbo_);
+      adjacency_size_ = 0;
+      if (!D3D9_CHECK(device->CreateVertexBuffer(
+              size, D3DUSAGE_WRITEONLY, 0, D3DPOOL_MANAGED, &adjacency_vbo_, nullptr)))
+      {
+        return false;
+      }
+      adjacency_size_ = size;
+    }
+    void *src, *dst;
+    if (FAILED(vbo->buffer_get()->Lock(0, 0, &src, D3DLOCK_READONLY))) {
+      return false;
+    }
+    if (FAILED(adjacency_vbo_->Lock(0, size, &dst, 0))) {
+      vbo->buffer_get()->Unlock();
+      return false;
+    }
+    AdjacencyVert *verts_dst = static_cast<AdjacencyVert *>(dst);
+    for (uint prim = 0; prim < prim_len; prim++) {
+      AdjacencyVert vert = {};
+      for (int i = 0; i < 4; i++) {
+        const uint index = ib ? indices[prim * 4 + i] : prim * 4 + i;
+        if (index < vbo->vertex_len) {
+          const float *p = reinterpret_cast<const float *>(static_cast<const uint8_t *>(src) +
+                                                           index * layout.stride +
+                                                           layout.attrs[0].offset);
+          vert.pos[i] = float3(p[0], p[1], pos_type == D3DDECLTYPE_FLOAT2 ? 0.0f : p[2]);
+        }
+      }
+      vert.end = 0.0f;
+      verts_dst[prim * 2] = vert;
+      vert.end = 1.0f;
+      verts_dst[prim * 2 + 1] = vert;
+    }
+    adjacency_vbo_->Unlock();
+    vbo->buffer_get()->Unlock();
+    adjacency_vert_ = vbo;
+    adjacency_vert_version_ = vbo->version_get();
+    adjacency_ib_ = source_ib;
+    adjacency_ib_version_ = ib_version;
+  }
+
+  D3D9Context *ctx = D3D9Context::get();
+  D3D9VertexDeclKey key;
+  for (int i = 0; i < 4; i++) {
+    key.elements.append({0,
+                         WORD(i * sizeof(float3)),
+                         D3DDECLTYPE_FLOAT3,
+                         D3DDECLMETHOD_DEFAULT,
+                         D3DDECLUSAGE_TEXCOORD,
+                         BYTE(i)});
+  }
+  key.elements.append({0,
+                       WORD(offsetof(AdjacencyVert, end)),
+                       D3DDECLTYPE_FLOAT1,
+                       D3DDECLMETHOD_DEFAULT,
+                       D3DDECLUSAGE_TEXCOORD,
+                       4});
+  IDirect3DVertexDeclaration9 *decl = ctx->vertex_declaration_get(key);
+  if (decl == nullptr) {
+    return false;
+  }
+  ctx->device->SetVertexDeclaration(decl);
+  ctx->device->SetStreamSource(0, adjacency_vbo_, 0, sizeof(AdjacencyVert));
+  return true;
+}
+
 bool D3D9Batch::bind_vertex_streams(D3D9Shader *shader, const DeindexRange *deindex)
 {
   D3D9Context *ctx = D3D9Context::get();
@@ -195,13 +297,27 @@ void D3D9Batch::draw(int v_first, int v_count, int i_first, int i_count)
   static const bool trace = getenv("BLENDER_D3D9_TRACE") != nullptr;
   D3DPRIMITIVETYPE type;
   uint prim_len;
-  if (!d3d9_primitive(prim_type, v_count, type, prim_len)) {
+  /* Each primitive of 4 indices is a line of 2 vertices of the adjacency buffer. */
+  const bool lines_adjacency = prim_type == GPU_PRIM_LINES_ADJ && shader->lines_adjacency();
+  if (prim_type == GPU_PRIM_POINTS && shader->points_as_line_strip()) {
+    /* The vertex count is the line count (lines from each point to the next). */
+    type = D3DPT_LINESTRIP;
+    prim_len = uint(v_count);
+  }
+  else if (lines_adjacency) {
+    type = D3DPT_LINELIST;
+    prim_len = uint(v_count / 4);
+    /* The adjacency buffer holds the primitives of the whole index buffer. */
+    const int index_start = elem ? int(static_cast<D3D9IndexBuf *>(elem)->draw_start_get()) : 0;
+    v_first = ((index_start + v_first) / 4) * 2;
+  }
+  else if (!d3d9_primitive(prim_type, v_count, type, prim_len)) {
     if (trace) {
       printf("  DROP: primitive %d\n", int(prim_type));
     }
     return;
   }
-  D3D9IndexBuf *ib = static_cast<D3D9IndexBuf *>(elem);
+  D3D9IndexBuf *ib = lines_adjacency ? nullptr : static_cast<D3D9IndexBuf *>(elem);
   /* Indexed point lists show only some of the points on Radeon 9x00 drivers: draw copies of the
    * vertices in index order instead (cached by the vertex buffers). */
   DeindexRange deindex_range;
@@ -214,7 +330,9 @@ void D3D9Batch::draw(int v_first, int v_count, int i_first, int i_count)
     ib = nullptr;
     v_first = 0;
   }
-  if (!bind_vertex_streams(shader, deindex)) {
+  if (lines_adjacency ? (prim_len == 0 || !bind_lines_adjacency()) :
+                        !bind_vertex_streams(shader, deindex))
+  {
     if (trace) {
       printf("  DROP: vertex streams\n");
     }

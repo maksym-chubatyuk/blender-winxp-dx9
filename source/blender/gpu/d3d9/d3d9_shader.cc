@@ -488,6 +488,14 @@ void D3D9Shader::parse_instance_data(const D3D9ShaderBinary &binary)
       point_sprite_ = true;
       continue;
     }
+    if (STREQ(key, "lines-adjacency")) {
+      lines_adjacency_ = true;
+      continue;
+    }
+    if (STREQ(key, "points-as-line-strip")) {
+      points_as_line_strip_ = true;
+      continue;
+    }
     if (STREQ(key, "resource-id")) {
       sscanf(annotation.c_str(), "%*s %d %d", &resource_id_slot_, &resource_id_stride_);
       continue;
