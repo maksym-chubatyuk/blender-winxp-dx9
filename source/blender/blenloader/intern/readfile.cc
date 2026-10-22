@@ -800,10 +800,23 @@ short blo_bhead_id_flag(const FileData *fd, const BHead *bhead)
 AssetMetaData *blo_bhead_id_asset_data_address(const FileData *fd, const BHead *bhead)
 {
   BLI_assert(blo_bhead_is_id_valid_type(bhead));
-  return (fd->id_asset_data_offset >= 0) ?
-             *reinterpret_cast<AssetMetaData **>(const_cast<BHead *>(
-                 POINTER_OFFSET(bhead, sizeof(*bhead) + fd->id_asset_data_offset))) :
-             nullptr;
+  if (fd->id_asset_data_offset < 0) {
+    return nullptr;
+  }
+  /* The ID is still in the file layout: the pointer has the size of the file pointers, and is
+   * converted like the old addresses of the blocks (see #uint32_from_uint64_ptr). */
+  const void *ptr = POINTER_OFFSET(bhead, sizeof(*bhead) + fd->id_asset_data_offset);
+  if (fd->filesdna->pointer_size == 8 && sizeof(void *) == 4) {
+    uint64_t ptr64;
+    memcpy(&ptr64, ptr, sizeof(ptr64));
+    return reinterpret_cast<AssetMetaData *>(uintptr_t(uint32_from_uint64_ptr(ptr64)));
+  }
+  if (fd->filesdna->pointer_size == 4 && sizeof(void *) == 8) {
+    uint32_t ptr32;
+    memcpy(&ptr32, ptr, sizeof(ptr32));
+    return reinterpret_cast<AssetMetaData *>(uintptr_t(ptr32));
+  }
+  return *reinterpret_cast<AssetMetaData *const *>(ptr);
 }
 
 static const IDHash *blo_bhead_id_deep_hash(const FileData *fd, const BHead *bhead)

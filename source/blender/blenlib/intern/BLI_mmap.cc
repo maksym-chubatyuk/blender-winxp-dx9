@@ -175,7 +175,9 @@ static void print_error(const char *message)
   char buffer[256];
   size_t length = BLI_string_join(buffer, sizeof(buffer), "BLI_mmap: ", message, "\r\n");
   HANDLE stderr_handle = GetStdHandle(STD_ERROR_HANDLE);
-  WriteFile(stderr_handle, buffer, length, nullptr, nullptr);
+  /* The written byte count can only be null for overlapped writes (Windows XP writes it). */
+  DWORD written;
+  WriteFile(stderr_handle, buffer, DWORD(length), &written, nullptr);
 }
 
 static bool try_map_zeros(BLI_mmap_file *file)

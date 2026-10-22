@@ -243,7 +243,10 @@ struct GPUSource {
       shader::PrintfFormat::Block::ArgumentType type =
           shader::PrintfFormat::Block::ArgumentType::NONE;
       int64_t start = 0, end = 0, cursor = -1;
-      while ((end = format.find_first_of('%', cursor + 1)) != -1) {
+      /* Compare with `npos` (and not -1): it doesn't fit in a 64-bit integer on 32-bit systems. */
+      size_t found;
+      while ((found = format.find_first_of('%', size_t(cursor + 1))) != std::string::npos) {
+        end = int64_t(found);
         if (end - start > 0) {
           /* Add the previous block without the newly found % character. */
           fmt.format_blocks.append({type, format.substr(start, end - start)});
