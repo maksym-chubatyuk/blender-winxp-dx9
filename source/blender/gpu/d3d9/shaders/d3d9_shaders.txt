@@ -67,3 +67,15 @@ workbench_prepass_mesh_transparent_studio_material_no_clip   workbench_prepass.h
 workbench_prepass_mesh_transparent_flat_material_no_clip     workbench_prepass.hlsl TRANSPARENT FLAT
 workbench_prepass_mesh_transparent_studio_material_clip      workbench_prepass.hlsl TRANSPARENT
 workbench_prepass_mesh_transparent_flat_material_clip        workbench_prepass.hlsl TRANSPARENT FLAT
+overlay_depth_mesh                             overlay_depth_mesh.hlsl
+overlay_depth_mesh_selectable                  overlay_depth_mesh.hlsl SELECT
+overlay_extra_selectable                       overlay_extra.hlsl SELECT
+overlay_extra_groundline_selectable            overlay_extra_groundline.hlsl SELECT
+overlay_extra_wire_selectable                  overlay_extra_wire.hlsl SELECT
+overlay_extra_wire_object_selectable           overlay_extra_wire.hlsl OBJECT_WIRE SELECT
+overlay_extra_point_selectable                 overlay_extra_point.hlsl SELECT
+overlay_wireframe_selectable                   overlay_wireframe.hlsl SELECT
+overlay_depth_mesh_conservative                overlay_depth_mesh.hlsl
+overlay_depth_mesh_conservative_selectable     overlay_depth_mesh.hlsl SELECT
+select_id_flat                                 select_id.hlsl
+select_id_uniform                              select_id.hlsl UNIFORM_ID

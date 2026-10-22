@@ -24,6 +24,11 @@ enum class D3D9TexelKind : uint8_t {
   FLOAT,
   /** Block compressed, uploaded as is. */
   COMPRESSED,
+  /**
+   * 32 bit unsigned integer stored as the 4 bytes of a `D3DFMT_A8R8G8B8` texel: exact with the
+   * 24 bit floats of SM2.0 pixel shaders, which write the bytes (see `select_id.hlsl`).
+   */
+  PACKED_U32,
   /** Depth (stencil) surface, not sampled. */
   DEPTH,
 };

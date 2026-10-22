@@ -12,8 +12,15 @@
 
 #include "d3d9_common.hlsl"
 #include "draw_common.hlsl"
+#include "select_common.hlsl"
 
+#ifdef SELECT
+// d3d9-resource-id 11 2
+// d3d9-instance select_custom_id 11 8 4 instance u
+float4 select_custom_id;
+#else
 // d3d9-resource-id 11 1
+#endif
 float4 view_buf[12];
 /* ObjectInfos of the instance: ob_color; index, light set, random, flag. */
 // d3d9-instance ob_info 9 80 32 res ffffuufu
@@ -64,6 +71,7 @@ struct VertOut {
   /* Alpha: 1 when the edge is visible (wireframe threshold). */
   float4 color : TEXCOORD0;
   float visible : TEXCOORD1;
+  SELECT_VARYING
 };
 
 VertOut vert(VertIn v)
@@ -130,6 +138,9 @@ VertOut vert(VertIn v)
   o.color = saturate(float4(color * wire_opacity, wire_opacity));
   /* Cull flat edges below threshold. */
   o.visible = (no_attr || v.wd <= wire_step_param) ? 1.0 : 0.0;
+#ifdef SELECT
+  o.select_data = select_data_get(select_custom_id.x, o.position);
+#endif
   return o;
 }
 
@@ -144,5 +155,8 @@ FragOut frag(VertOut v)
   clip(v.visible - 0.5);
   o.color = v.color;
   o.line_output = float4(0.0, 0.0, 0.0, 0.0);
+#ifdef SELECT
+  o.color = select_output(v.select_data);
+#endif
   return o;
 }

@@ -455,7 +455,25 @@ void D3D9Shader::parse_instance_data(const D3D9ShaderBinary &binary)
       continue;
     }
     if (STREQ(key, "vertex-pull")) {
-      sscanf(annotation.c_str(), "%*s %d %d", &vertex_pull_slot_, &vertex_pull_stride_);
+      VertexPull pull;
+      char pull_types[32] = "";
+      if (sscanf(annotation.c_str(),
+                 "%*s %d %d %d %31s",
+                 &pull.slot,
+                 &pull.stride,
+                 &pull.location,
+                 pull_types) == 4)
+      {
+        pull.types = pull_types;
+        vertex_pulls_.append(pull);
+      }
+      else {
+        CLOG_ERROR(&LOG, "Shader \"%s\": invalid annotation \"%s\"", this->name, annotation.c_str());
+      }
+      continue;
+    }
+    if (STREQ(key, "select-output")) {
+      select_output_ = true;
       continue;
     }
     if (STREQ(key, "point-sprite")) {

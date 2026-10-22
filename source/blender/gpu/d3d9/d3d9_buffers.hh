@@ -68,6 +68,12 @@ class D3D9StorageBuf : public StorageBuf {
   {
     return host_data_.data();
   }
+  /** Data written by the CPU in place of shaders (selection). */
+  uint8_t *data_get_mutable()
+  {
+    vbo_dirty_ = true;
+    return host_data_.data();
+  }
   size_t size_get() const
   {
     return host_data_.size();

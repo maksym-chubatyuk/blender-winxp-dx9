@@ -56,6 +56,8 @@ D3D9TextureFormat d3d9_texture_format(TextureFormat format)
     case TextureFormat::UNORM_16:
     case TextureFormat::SNORM_16:
       return {D3DFMT_R16F, K::HALF, 1};
+    case TextureFormat::UINT_32:
+      return {D3DFMT_A8R8G8B8, K::PACKED_U32, 1};
     case TextureFormat::SFLOAT_32_32_32_32:
     case TextureFormat::SFLOAT_32_32_32:
     case TextureFormat::UINT_32_32_32_32:
@@ -80,7 +82,6 @@ D3D9TextureFormat d3d9_texture_format(TextureFormat format)
     case TextureFormat::SINT_8_8:
       return {D3DFMT_G32R32F, K::FLOAT, 2};
     case TextureFormat::SFLOAT_32:
-    case TextureFormat::UINT_32:
     case TextureFormat::SINT_32:
     case TextureFormat::UINT_16:
     case TextureFormat::SINT_16:
@@ -276,6 +277,12 @@ static void device_texel_decode(const D3D9TextureFormat &format,
       }
       break;
     }
+    case D3D9TexelKind::PACKED_U32: {
+      uint32_t v;
+      memcpy(&v, src, 4);
+      r_value[0] = float(v);
+      break;
+    }
     default:
       break;
   }
@@ -312,6 +319,11 @@ static void device_texel_encode(const D3D9TextureFormat &format,
       for (int c = 0; c < format.components; c++) {
         f[c] = value[c];
       }
+      break;
+    }
+    case D3D9TexelKind::PACKED_U32: {
+      const uint32_t v = uint32_t(max_ff(value[0], 0.0f));
+      memcpy(dst, &v, 4);
       break;
     }
     default:

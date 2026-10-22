@@ -10,6 +10,12 @@
 #include "d3d9_common.hlsl"
 #define DRW_NO_MODEL
 #include "draw_common.hlsl"
+#include "select_common.hlsl"
+
+#ifdef SELECT
+// d3d9-instance select_instance_id 5 4 0 instance u
+float4 select_instance_id;
+#endif
 
 float4 view_buf[16];
 /* ExtraInstanceData of the instance: color, object_to_world (with packed data in the last
@@ -47,6 +53,7 @@ struct VertIn {
 struct VertOut {
   float4 position : POSITION;
   float4 color : TEXCOORD0;
+  SELECT_VARYING
 };
 
 VertOut vert(VertIn v)
@@ -118,6 +125,9 @@ VertOut vert(VertIn v)
   o.position = gpu_position(drw_mat_mul(
       view_buf, DRW_WINMAT, drw_mat_mul(view_buf, DRW_VIEWMAT, float4(world_pos, 1.0))));
   o.color = final_color;
+#ifdef SELECT
+  o.select_data = select_data_get(select_instance_id.x, o.position);
+#endif
   return o;
 }
 
@@ -131,5 +141,8 @@ FragOut frag(VertOut v)
   FragOut o;
   o.color = v.color;
   o.line_output = float4(0.0, 0.0, 0.0, 0.0);
+#ifdef SELECT
+  o.color = select_output(v.select_data);
+#endif
   return o;
 }

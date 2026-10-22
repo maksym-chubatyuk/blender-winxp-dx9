@@ -113,27 +113,31 @@ bool D3D9Batch::bind_vertex_streams(D3D9Shader *shader)
     }
   }
 
-  if (shader->vertex_pull_slot() >= 0 && shader->vertex_pull_slot() < D3D9_MAX_SSBO_SLOTS) {
-    /* Vertices read from a storage buffer: bind it as a vertex stream of float4 columns. */
-    D3D9StorageBuf *ssbo = ctx->bound_ssbos[shader->vertex_pull_slot()];
+  for (const D3D9Shader::VertexPull &pull : shader->vertex_pulls()) {
+    /* Vertices read from a storage buffer: bind it as a vertex stream. */
+    D3D9StorageBuf *ssbo = (pull.slot >= 0 && pull.slot < D3D9_MAX_SSBO_SLOTS) ?
+                               ctx->bound_ssbos[pull.slot] :
+                               nullptr;
     IDirect3DVertexBuffer9 *buffer = ssbo ? ssbo->vertex_buffer_get() : nullptr;
-    const int stride = shader->vertex_pull_stride();
-    if (buffer == nullptr || stride <= 0) {
+    if (buffer == nullptr || pull.stride <= 0) {
       return false;
     }
-    for (int column = 0; column < stride / 16; column++) {
-      if (!(inputs & (1 << column)) || (bound & (1 << column))) {
-        continue;
+    int offset = 0;
+    for (int column = 0; column < int(pull.types.size()); column++) {
+      const bool is_color = pull.types[column] == 'c';
+      const int loc = pull.location + column;
+      if ((inputs & (1 << loc)) && !(bound & (1 << loc))) {
+        key.elements.append({WORD(stream),
+                             WORD(offset),
+                             BYTE(is_color ? D3DDECLTYPE_D3DCOLOR : D3DDECLTYPE_FLOAT4),
+                             D3DDECLMETHOD_DEFAULT,
+                             D3DDECLUSAGE_TEXCOORD,
+                             BYTE(loc)});
+        bound |= 1 << loc;
       }
-      key.elements.append({WORD(stream),
-                           WORD(column * 16),
-                           D3DDECLTYPE_FLOAT4,
-                           D3DDECLMETHOD_DEFAULT,
-                           D3DDECLUSAGE_TEXCOORD,
-                           BYTE(column)});
-      bound |= 1 << column;
+      offset += is_color ? 4 : 16;
     }
-    device->SetStreamSource(stream, buffer, 0, UINT(stride));
+    device->SetStreamSource(stream, buffer, 0, UINT(pull.stride));
     stream++;
   }
 
@@ -227,6 +231,11 @@ void D3D9Batch::draw(int v_first, int v_count, int i_first, int i_count)
 
   const bool close_loop = prim_type == GPU_PRIM_LINE_LOOP && v_count > 2 && ib == nullptr;
 
+  const bool select_output = shader->select_output();
+  if (select_output && !ctx->select_draw_begin()) {
+    return;
+  }
+
   const bool per_instance_data = shader->has_instance_data();
   for (int instance = i_first; instance < i_first + i_count; instance++) {
     if (instance != 0 || i_count > 1) {
@@ -261,6 +270,9 @@ void D3D9Batch::draw(int v_first, int v_count, int i_first, int i_count)
   }
   if (i_count > 1 || i_first != 0) {
     ctx->instance_id_set(0);
+  }
+  if (select_output) {
+    ctx->select_draw_end();
   }
 }
 

@@ -435,7 +435,8 @@ void D3D9FrameBuffer::read(GPUFrameBufferBits planes,
 
   D3DLOCKED_RECT locked;
   if (ok && SUCCEEDED(staging->LockRect(&locked, nullptr, D3DLOCK_READONLY))) {
-    const int device_texel = device_format.kind == D3D9TexelKind::UNORM8 ?
+    const int device_texel = device_format.kind == D3D9TexelKind::PACKED_U32 ? 4 :
+                             device_format.kind == D3D9TexelKind::UNORM8 ?
                                  (device_format.components == 1 ? 1 : 4) :
                              device_format.kind == D3D9TexelKind::HALF ?
                                  device_format.components * 2 :
@@ -455,6 +456,13 @@ void D3D9FrameBuffer::read(GPUFrameBufferBits planes,
           continue;
         }
         const uint8_t *s = src + x * device_texel;
+        if (device_format.kind == D3D9TexelKind::PACKED_U32 &&
+            ELEM(format, GPU_DATA_UINT, GPU_DATA_INT))
+        {
+          /* Exact integers, beyond the 24 bits of a float. */
+          memcpy(dst, s, 4);
+          continue;
+        }
         float texel[4] = {0.0f, 0.0f, 0.0f, 1.0f};
         if (device_format.kind == D3D9TexelKind::UNORM8 && device_format.components == 4) {
           texel[0] = s[2] / 255.0f;
@@ -470,6 +478,11 @@ void D3D9FrameBuffer::read(GPUFrameBufferBits planes,
           for (int c = 0; c < device_format.components; c++) {
             texel[c] = math::half_to_float(h[c]);
           }
+        }
+        else if (device_format.kind == D3D9TexelKind::PACKED_U32) {
+          uint32_t v;
+          memcpy(&v, s, 4);
+          texel[0] = float(v);
         }
         else {
           memcpy(texel, s, sizeof(float) * device_format.components);

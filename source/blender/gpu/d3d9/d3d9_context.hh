@@ -114,6 +114,14 @@ class D3D9Context : public Context {
   /** Rasterize the points of the next draws as sprites (see #D3D9Shader::point_sprite). */
   void point_sprite_set(bool enable);
 
+  /**
+   * Selection draws (`d3d9-select-output` shaders): the fragments write (select id + 1, depth) to
+   * a private float target instead of the frame-buffer colors. #select_draw_end reads it back and
+   * applies `select_id_output()` (`select_lib.glsl`) on the CPU to the bound selection buffers.
+   */
+  bool select_draw_begin();
+  void select_draw_end();
+
   /** Get or create the vertex declaration for the element list. */
   IDirect3DVertexDeclaration9 *vertex_declaration_get(const D3D9VertexDeclKey &key);
 
@@ -131,6 +139,12 @@ class D3D9Context : public Context {
   /** Last #D3DRS_POINTSPRITEENABLE value, -1 when unknown. */
   int point_sprite_ = -1;
   Map<D3D9VertexDeclKey, IDirect3DVertexDeclaration9 *> vertex_decls_;
+
+  /* Selection draws, see #select_draw_begin. */
+  IDirect3DTexture9 *select_tx_ = nullptr;
+  IDirect3DSurface9 *select_readback_ = nullptr;
+  int select_width_ = 0, select_height_ = 0;
+  DWORD select_saved_states_[3] = {};
 };
 
 }  // namespace blender::gpu

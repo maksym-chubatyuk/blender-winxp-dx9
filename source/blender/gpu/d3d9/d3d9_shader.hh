@@ -131,15 +131,25 @@ class D3D9Shader : public Shader {
   {
     return point_sprite_;
   }
-  /** Storage buffer slot the vertices are read from (`d3d9-vertex-pull`), -1 if none. Its float4
-   * columns are bound to the inputs `TEXCOORD0` and up. */
-  int vertex_pull_slot() const
+  /**
+   * Storage buffer read per vertex (`d3d9-vertex-pull <slot> <stride> <location> <types>`): its
+   * columns are bound to the inputs `TEXCOORD<location>` and up. Types: `f` float4 (16 bytes), `c`
+   * 4 bytes read as a normalized D3DCOLOR (BGRA order).
+   */
+  struct VertexPull {
+    int slot = -1;
+    int stride = 0;
+    int location = 0;
+    std::string types;
+  };
+  Span<VertexPull> vertex_pulls() const
   {
-    return vertex_pull_slot_;
+    return vertex_pulls_;
   }
-  int vertex_pull_stride() const
+  /** The fragments write the select id instead of colors (see #D3D9Context::select_draw_begin). */
+  bool select_output() const
   {
-    return vertex_pull_stride_;
+    return select_output_;
   }
   bool has_instance_data() const
   {
@@ -219,8 +229,8 @@ class D3D9Shader : public Shader {
   /** Storage buffer slot of the resource ids, and number of words per instance. */
   int resource_id_slot_ = -1;
   bool point_sprite_ = false;
-  int vertex_pull_slot_ = -1;
-  int vertex_pull_stride_ = 0;
+  Vector<VertexPull> vertex_pulls_;
+  bool select_output_ = false;
   int resource_id_stride_ = 1;
 
   /** CPU copy of the constant registers and the dirty register ranges. */

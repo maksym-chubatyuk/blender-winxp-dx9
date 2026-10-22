@@ -12,8 +12,19 @@
 
 #include "d3d9_common.hlsl"
 #include "draw_common.hlsl"
+#include "select_common.hlsl"
 
+#ifdef SELECT
+// d3d9-resource-id 11 2
+#  ifdef OBJECT_WIRE
+// d3d9-instance select_instance_id 11 8 4 instance u
+#  else
+// d3d9-instance select_instance_id 5 4 0 instance u
+#  endif
+float4 select_instance_id;
+#else
 // d3d9-resource-id 11 1
+#endif
 float4 view_buf[12];
 
 #ifdef OBJECT_WIRE
@@ -21,7 +32,7 @@ struct VertIn {
   float3 pos : TEXCOORD0;
 };
 #else
-// d3d9-vertex-pull 0 32
+// d3d9-vertex-pull 0 32 0 ff
 /* Theme colors: camera_path. */
 float4 uniform_buf__10;
 float colorid;
@@ -35,6 +46,7 @@ struct VertIn {
 struct VertOut {
   float4 position : POSITION;
   float4 color : TEXCOORD0;
+  SELECT_VARYING
 };
 
 VertOut vert(VertIn v)
@@ -51,6 +63,9 @@ VertOut vert(VertIn v)
   o.color = colorid != 0.0 ? uniform_buf__10 : v.color;
 #endif
   o.color = saturate(float4(o.color.rgb, 1.0));
+#ifdef SELECT
+  o.select_data = select_data_get(select_instance_id.x, o.position);
+#endif
   return o;
 }
 
@@ -64,5 +79,8 @@ FragOut frag(VertOut v)
   FragOut o;
   o.color = v.color;
   o.line_output = float4(0.0, 0.0, 0.0, 0.0);
+#ifdef SELECT
+  o.color = select_output(v.select_data);
+#endif
   return o;
 }

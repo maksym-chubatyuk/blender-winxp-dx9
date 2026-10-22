@@ -10,10 +10,17 @@
 
 #include "d3d9_common.hlsl"
 #include "draw_common.hlsl"
+#include "select_common.hlsl"
 
+// d3d9-vertex-pull 0 32 0 ff
+#ifdef SELECT
+/* Select id of the vertex (no sprites: they replace all the texture coordinates). */
+// d3d9-resource-id 11 2
+// d3d9-vertex-pull 5 4 2 c
+#else
 // d3d9-resource-id 11 1
-// d3d9-vertex-pull 0 32
 // d3d9-point-sprite
+#endif
 float4 view_buf[12];
 /* Theme sizes: pixel, object_center; light_circle_shadow, vert. */
 float4 uniform_buf__94[2];
@@ -25,6 +32,9 @@ float4 uniform_buf__46;
 struct VertIn {
   float4 pos : TEXCOORD0;
   float4 color : TEXCOORD1;
+#ifdef SELECT
+  float4 select_id : TEXCOORD2;
+#endif
 };
 
 struct VertOut {
@@ -33,6 +43,7 @@ struct VertOut {
   float4 fill_color : COLOR0;
   /* Point radii (outer, outer AA, inner, inner AA), divided by the point size. */
   float4 radii : COLOR1;
+  SELECT_VARYING
 };
 
 VertOut vert(VertIn v)
@@ -55,6 +66,9 @@ VertOut vert(VertIn v)
                             radius - outline_width - 1.0) /
                      size);
 #endif
+#ifdef SELECT
+  o.select_data = select_data_get(select_id_from_color(v.select_id), o.position);
+#endif
   return o;
 }
 
@@ -63,6 +77,15 @@ struct FragOut {
   float4 line_output : COLOR1;
 };
 
+#ifdef SELECT
+FragOut frag(VertOut v)
+{
+  FragOut o;
+  o.color = select_output(v.select_data);
+  o.line_output = float4(0.0, 0.0, 0.0, 0.0);
+  return o;
+}
+#else
 FragOut frag(VertOut v, float2 point_coord : TEXCOORD0)
 {
   FragOut o;
@@ -86,3 +109,4 @@ FragOut frag(VertOut v, float2 point_coord : TEXCOORD0)
 #endif
   return o;
 }
+#endif

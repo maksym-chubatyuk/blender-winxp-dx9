@@ -57,10 +57,34 @@ static bool read_file(const std::string &path, std::string &r_content)
   return true;
 }
 
+/**
+ * Turn the `// d3d9-...` annotation comments into `__d3d9_annotation "d3d9-..."` lines, which
+ * survive the preprocessor: the annotations of disabled `#if` blocks are then left out.
+ */
+static std::string annotations_as_code(const std::string &source)
+{
+  std::string result;
+  std::istringstream lines(source);
+  std::string line;
+  while (std::getline(lines, line)) {
+    const size_t start = line.find_first_not_of(" \t");
+    if (start != std::string::npos && line.compare(start, 8, "// d3d9-") == 0) {
+      std::string annotation = line.substr(start + 3);
+      annotation.erase(annotation.find_last_not_of(" \t\r") + 1);
+      line = "__d3d9_annotation \"" + annotation + "\"";
+    }
+    result += line + "\n";
+  }
+  return result;
+}
+
 /** Resolve `#include "file"` relative to the HLSL directory. */
 class Includer : public ID3DInclude {
  public:
-  explicit Includer(std::string dir) : dir_(std::move(dir)) {}
+  explicit Includer(std::string dir, bool annotations = false)
+      : dir_(std::move(dir)), annotations_(annotations)
+  {
+  }
 
   STDMETHOD(Open)
   (D3D_INCLUDE_TYPE /*type*/,
@@ -73,6 +97,9 @@ class Includer : public ID3DInclude {
     if (!read_file(dir_ + "/" + file_name, *content)) {
       delete content;
       return E_FAIL;
+    }
+    if (annotations_) {
+      *content = annotations_as_code(*content);
     }
     files_[content->data()] = content;
     *r_data = content->data();
@@ -92,6 +119,7 @@ class Includer : public ID3DInclude {
 
  private:
   std::string dir_;
+  bool annotations_;
   std::map<const char *, std::string *> files_;
 };
 
@@ -274,7 +302,18 @@ static std::string vertex_attributes(const Entry &entry,
   }
   const size_t open = code.find('{', start);
   const size_t close = code.find('}', open);
-  std::string body = code.substr(open + 1, close - open - 1);
+  std::string body;
+  {
+    /* Without the preprocessor lines (`#line`) between the members. */
+    std::istringstream lines(code.substr(open + 1, close - open - 1));
+    std::string line;
+    while (std::getline(lines, line)) {
+      const size_t start = line.find_first_not_of(" \t");
+      if (start == std::string::npos || line[start] != '#') {
+        body += line + "\n";
+      }
+    }
+  }
   std::string result;
   std::istringstream members(body);
   std::string member;
@@ -305,39 +344,48 @@ static std::string vertex_attributes(const Entry &entry,
   return result;
 }
 
-/** Source of the file with its includes inlined (for the annotations, comments are kept). */
-static std::string gather_source(const std::string &dir,
-                                 const std::string &file,
-                                 std::vector<std::string> &r_seen)
+/**
+ * The annotations of the shader variant (its defines applied), as `// d3d9-...` lines.
+ */
+static std::string variant_annotations(const Entry &entry,
+                                       const std::string &source,
+                                       const std::string &dir)
 {
-  for (const std::string &seen : r_seen) {
-    if (seen == file) {
-      return "";
+  std::vector<std::string> storage;
+  std::vector<D3D_SHADER_MACRO> macros = make_macros(entry, storage);
+  Includer includer(dir, true);
+  const std::string annotated = annotations_as_code(source);
+  ID3DBlob *text = nullptr, *errors = nullptr;
+  if (FAILED(d3d_preprocess(annotated.data(),
+                            annotated.size(),
+                            entry.file.c_str(),
+                            macros.data(),
+                            &includer,
+                            &text,
+                            &errors)))
+  {
+    if (errors) {
+      fprintf(stderr, "%s", static_cast<const char *>(errors->GetBufferPointer()));
+      errors->Release();
     }
-  }
-  r_seen.push_back(file);
-  std::string content;
-  if (!read_file(dir + "/" + file, content)) {
     return "";
   }
+  const std::string code(static_cast<const char *>(text->GetBufferPointer()),
+                         text->GetBufferSize());
+  text->Release();
+  if (errors) {
+    errors->Release();
+  }
   std::string result;
-  std::istringstream lines(content);
-  std::string line;
-  while (std::getline(lines, line)) {
-    /* `#include "file"`, also indented after the '#'. */
-    const size_t hash = line.find_first_not_of(" \t");
-    if (hash != std::string::npos && line[hash] == '#') {
-      const size_t directive = line.find_first_not_of(" \t", hash + 1);
-      if (directive != std::string::npos && line.compare(directive, 7, "include") == 0) {
-        const size_t start = line.find('"', directive + 7);
-        const size_t end = (start != std::string::npos) ? line.find('"', start + 1) :
-                                                          std::string::npos;
-        if (end != std::string::npos) {
-          result += gather_source(dir, line.substr(start + 1, end - start - 1), r_seen);
-        }
-      }
+  const std::string key = "__d3d9_annotation \"";
+  for (size_t pos = code.find(key); pos != std::string::npos; pos = code.find(key, pos)) {
+    pos += key.size();
+    const size_t end = code.find('"', pos);
+    if (end == std::string::npos) {
+      break;
     }
-    result += line + "\n";
+    result += "// " + code.substr(pos, end - pos) + "\n";
+    pos = end;
   }
   return result;
 }
@@ -352,7 +400,7 @@ static std::string instance_annotations(const std::string &source)
   std::istringstream lines(source);
   std::string line;
   while (std::getline(lines, line)) {
-    for (const char *key : {"// d3d9-instance ", "// d3d9-resource-id ", "// d3d9-point-sprite", "// d3d9-vertex-pull "}) {
+    for (const char *key : {"// d3d9-instance ", "// d3d9-resource-id ", "// d3d9-point-sprite", "// d3d9-vertex-pull ", "// d3d9-select-output"}) {
       const size_t pos = line.find(key);
       if (pos == std::string::npos) {
         continue;
@@ -458,8 +506,7 @@ int main(int argc, char **argv)
       continue;
     }
     const std::string attrs = vertex_attributes(entry, source, dir);
-    std::vector<std::string> seen;
-    const std::string full_source = gather_source(dir, entry.file, seen);
+    const std::string full_source = variant_annotations(entry, source, dir);
     char name[64];
     snprintf(name, sizeof(name), "sh%zu_vs", i);
     write_array(out, name, vs);

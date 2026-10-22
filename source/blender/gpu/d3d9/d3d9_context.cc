@@ -7,12 +7,16 @@
  */
 
 #include <cstdio>
+#include <cstring>
 
 #include "BLI_hash.hh"
+#include "BLI_math_base.h"
+#include "BLI_math_bits.h"
 
 #include "GHOST_IWindow.hh"
 
 #include "d3d9_backend.hh"
+#include "d3d9_buffers.hh"
 #include "d3d9_context.hh"
 #include "d3d9_framebuffer.hh"
 #include "d3d9_immediate.hh"
@@ -105,6 +109,8 @@ D3D9Context::~D3D9Context()
     }
   }
   vertex_decls_.clear();
+  d3d9_release(select_tx_);
+  d3d9_release(select_readback_);
 }
 
 /** \} */
@@ -285,6 +291,138 @@ void D3D9Context::state_invalidate()
   if (shader) {
     shader->bind(nullptr);
   }
+}
+
+/* Keep in sync with `select_shader_shared.hh` and `select_defines.hh`. */
+constexpr int SELECT_DATA_SLOT = 4;
+constexpr int SELECT_ID_OUT_SLOT = 6;
+enum { SELECT_ALL = 0, SELECT_PICK_ALL = 1, SELECT_PICK_NEAREST = 2 };
+
+bool D3D9Context::select_draw_begin()
+{
+  D3D9FrameBuffer *fb = static_cast<D3D9FrameBuffer *>(active_fb);
+  const int2 size = fb->size_get();
+  if (size.x <= 0 || size.y <= 0) {
+    return false;
+  }
+  if (select_tx_ == nullptr || select_width_ != size.x || select_height_ != size.y) {
+    d3d9_release(select_tx_);
+    d3d9_release(select_readback_);
+    if (!D3D9_CHECK(device->CreateTexture(UINT(size.x),
+                                          UINT(size.y),
+                                          1,
+                                          D3DUSAGE_RENDERTARGET,
+                                          D3DFMT_A32B32G32R32F,
+                                          D3DPOOL_DEFAULT,
+                                          &select_tx_,
+                                          nullptr)) ||
+        !D3D9_CHECK(device->CreateOffscreenPlainSurface(UINT(size.x),
+                                                        UINT(size.y),
+                                                        D3DFMT_A32B32G32R32F,
+                                                        D3DPOOL_SYSTEMMEM,
+                                                        &select_readback_,
+                                                        nullptr)))
+    {
+      d3d9_release(select_tx_);
+      d3d9_release(select_readback_);
+      return false;
+    }
+    select_width_ = size.x;
+    select_height_ = size.y;
+  }
+
+  IDirect3DSurface9 *surface = nullptr;
+  select_tx_->GetSurfaceLevel(0, &surface);
+  D3DVIEWPORT9 viewport;
+  device->GetViewport(&viewport);
+  device->SetRenderTarget(0, surface);
+  d3d9_release(surface);
+  for (int i = 1; i < 4; i++) {
+    device->SetRenderTarget(i, nullptr);
+  }
+  /* Clear all of it, the clear is limited to the viewport. */
+  device->Clear(0, nullptr, D3DCLEAR_TARGET, 0, 1.0f, 0);
+  device->SetViewport(&viewport);
+
+  /* The ids are written whatever the pass state is (depth only passes, blending). */
+  device->GetRenderState(D3DRS_COLORWRITEENABLE, &select_saved_states_[0]);
+  device->GetRenderState(D3DRS_ALPHABLENDENABLE, &select_saved_states_[1]);
+  device->GetRenderState(D3DRS_SRGBWRITEENABLE, &select_saved_states_[2]);
+  device->SetRenderState(D3DRS_COLORWRITEENABLE, 0xF);
+  device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+  device->SetRenderState(D3DRS_SRGBWRITEENABLE, FALSE);
+  return true;
+}
+
+void D3D9Context::select_draw_end()
+{
+  D3D9FrameBuffer *fb = static_cast<D3D9FrameBuffer *>(active_fb);
+  device->SetRenderState(D3DRS_COLORWRITEENABLE, select_saved_states_[0]);
+  device->SetRenderState(D3DRS_ALPHABLENDENABLE, select_saved_states_[1]);
+  device->SetRenderState(D3DRS_SRGBWRITEENABLE, select_saved_states_[2]);
+  /* Bind the frame-buffer targets again on the next draw. */
+  fb->tag_dirty();
+
+  const D3D9UniformBuf *info_buf = bound_ubos[SELECT_DATA_SLOT];
+  D3D9StorageBuf *out_buf = bound_ssbos[SELECT_ID_OUT_SLOT];
+  if (info_buf == nullptr || out_buf == nullptr) {
+    return;
+  }
+  /* SelectInfoData: int2 cursor, uint mode, int radius. */
+  int32_t info[4];
+  memcpy(info, info_buf->data_get(), sizeof(info));
+  const int2 cursor(info[0], info[1]);
+  const int mode = info[2];
+  const int radius = info[3];
+
+  IDirect3DSurface9 *surface = nullptr;
+  select_tx_->GetSurfaceLevel(0, &surface);
+  const HRESULT hr = device->GetRenderTargetData(surface, select_readback_);
+  d3d9_release(surface);
+  D3DLOCKED_RECT locked;
+  if (FAILED(hr) || FAILED(select_readback_->LockRect(&locked, nullptr, D3DLOCK_READONLY))) {
+    return;
+  }
+  uint32_t *out = reinterpret_cast<uint32_t *>(out_buf->data_get_mutable());
+  const size_t out_len = out_buf->size_get() / 4;
+  const bool flipped = fb->is_flipped();
+  for (int row = 0; row < select_height_; row++) {
+    const float *pixel = reinterpret_cast<const float *>(static_cast<const uint8_t *>(locked.pBits) +
+                                                         size_t(row) * locked.Pitch);
+    /* Flipped targets have the OpenGL memory layout: the rows go up. */
+    const int y = flipped ? row : select_height_ - 1 - row;
+    for (int x = 0; x < select_width_; x++, pixel += 4) {
+      if (pixel[0] < 0.5f) {
+        continue;
+      }
+      const uint32_t id = uint32_t(pixel[0] - 0.5f);
+      const float depth = clamp_f(pixel[1], 0.0f, 1.0f);
+      if (mode == SELECT_ALL) {
+        if (radius > 0) {
+          const int2 coord = int2(x, y) - cursor;
+          if (coord.x * coord.x + coord.y * coord.y > radius * radius) {
+            continue;
+          }
+        }
+        if (id / 32 < out_len) {
+          out[id / 32] |= 1u << (id % 32);
+        }
+      }
+      else if (mode == SELECT_PICK_ALL) {
+        if (id < out_len) {
+          out[id] = min_uu(out[id], float_as_uint(depth));
+        }
+      }
+      else if (mode == SELECT_PICK_NEAREST) {
+        const int dist = max_ii(abs(x - cursor.x), abs(y - cursor.y));
+        if (dist < 0xFF && id < out_len) {
+          const uint32_t packed = (uint32_t(depth * float(0x00FFFFFFu)) << 8u) | uint32_t(dist);
+          out[id] = min_uu(out[id], packed);
+        }
+      }
+    }
+  }
+  select_readback_->UnlockRect();
 }
 
 void D3D9Context::point_sprite_set(bool enable)
