@@ -202,7 +202,7 @@ bool D3D9Context::draw_setup()
   if (state.active_fb != fb) {
     state.active_fb = fb;
   }
-  fb->apply_state();
+  fb->apply_state(state.state.blend != GPU_BLEND_NONE);
   state.apply_state();
 
   /* Reserved vertex shader constants, see `d3d9_common.hlsl`. */
@@ -257,6 +257,15 @@ bool D3D9Context::draw_setup()
     }
   }
 
+  /* `BLENDER_D3D9_TRACE_VS=<shader name>`: dump the vertex shader constants of its draws. */
+  static const char *trace_vs = getenv("BLENDER_D3D9_TRACE_VS");
+  if (trace_vs && sh->name_get() == trace_vs) {
+    const Span<float4> vs = sh->vs_constants_get();
+    for (const int i : vs.index_range()) {
+      printf("  vs c%d = (%g %g %g %g)\n", i, vs[i].x, vs[i].y, vs[i].z, vs[i].w);
+    }
+  }
+
   sh->constants_upload(device);
 
   ensure_scene();
@@ -267,8 +276,17 @@ void D3D9Context::state_invalidate()
 {
   static_cast<D3D9FrameBuffer *>(active_fb)->tag_dirty();
   state_manager->force_state();
+  point_sprite_ = -1;
   if (shader) {
     shader->bind(nullptr);
+  }
+}
+
+void D3D9Context::point_sprite_set(bool enable)
+{
+  if (point_sprite_ != int(enable)) {
+    device->SetRenderState(D3DRS_POINTSPRITEENABLE, enable ? TRUE : FALSE);
+    point_sprite_ = int(enable);
   }
 }
 

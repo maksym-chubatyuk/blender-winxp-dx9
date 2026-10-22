@@ -29,6 +29,8 @@ class D3D9Backend : public GPUBackend {
 
   /** Optional features, see #capabilities_init. */
   bool supports_separate_alpha_blend = false;
+  /** Blending with several render targets bound (not on R300 class hardware). */
+  bool supports_mrt_blending = false;
   bool supports_non_pow2 = false;
   bool supports_index_u32 = false;
   bool supports_autogen_mipmap = false;

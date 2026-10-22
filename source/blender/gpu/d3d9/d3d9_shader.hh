@@ -125,6 +125,12 @@ class D3D9Shader : public Shader {
   }
 
   /** The shader reads per instance data (object matrices...) from storage buffers. */
+  /** Points are rasterized as sprites: all texture coordinates are replaced by the sprite ones
+   * (`gl_PointCoord`), the other outputs use the `COLOR` semantics. */
+  bool point_sprite() const
+  {
+    return point_sprite_;
+  }
   bool has_instance_data() const
   {
     return !instance_data_.is_empty();
@@ -136,6 +142,10 @@ class D3D9Shader : public Shader {
   const float4 *ps_constants_get() const
   {
     return ps_constants_.is_empty() ? nullptr : ps_constants_.data();
+  }
+  Span<float4> vs_constants_get() const
+  {
+    return vs_constants_;
   }
 
   /** Send the modified constants to the device, the shader must be bound. */
@@ -198,6 +208,7 @@ class D3D9Shader : public Shader {
   Vector<InstanceData> instance_data_;
   /** Storage buffer slot of the resource ids, and number of words per instance. */
   int resource_id_slot_ = -1;
+  bool point_sprite_ = false;
   int resource_id_stride_ = 1;
 
   /** CPU copy of the constant registers and the dirty register ranges. */

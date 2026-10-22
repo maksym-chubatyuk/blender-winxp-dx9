@@ -150,6 +150,7 @@ void D3D9Backend::capabilities_init()
   }
 
   supports_separate_alpha_blend = (caps.PrimitiveMiscCaps & D3DPMISCCAPS_SEPARATEALPHABLEND) != 0;
+  supports_mrt_blending = (caps.PrimitiveMiscCaps & D3DPMISCCAPS_MRTPOSTPIXELSHADERBLENDING) != 0;
   supports_blend_op = (caps.PrimitiveMiscCaps & D3DPMISCCAPS_BLENDOP) != 0;
   supports_non_pow2 = (caps.TextureCaps & D3DPTEXTURECAPS_POW2) == 0 ||
                       (caps.TextureCaps & D3DPTEXTURECAPS_NONPOW2CONDITIONAL) != 0;

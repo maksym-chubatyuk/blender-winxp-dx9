@@ -52,3 +52,8 @@ overlay_grid_next                              overlay_grid.hlsl
 overlay_outline_prepass_mesh                   overlay_outline.hlsl PREPASS
 overlay_outline_detect                         overlay_outline.hlsl DETECT
 overlay_extra                                  overlay_extra.hlsl
+overlay_edit_mesh_vert                         overlay_edit_mesh.hlsl VERT
+overlay_edit_mesh_edge                         overlay_edit_mesh.hlsl EDGE
+overlay_edit_mesh_face                         overlay_edit_mesh.hlsl FACE
+overlay_edit_mesh_facedot                      overlay_edit_mesh.hlsl FACEDOT
+overlay_edit_mesh_depth                        overlay_edit_mesh.hlsl DEPTH

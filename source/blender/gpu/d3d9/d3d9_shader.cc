@@ -454,6 +454,10 @@ void D3D9Shader::parse_instance_data(const D3D9ShaderBinary &binary)
     if (sscanf(annotation.c_str(), "%31s", key) != 1) {
       continue;
     }
+    if (STREQ(key, "point-sprite")) {
+      point_sprite_ = true;
+      continue;
+    }
     if (STREQ(key, "resource-id")) {
       sscanf(annotation.c_str(), "%*s %d %d", &resource_id_slot_, &resource_id_stride_);
       continue;

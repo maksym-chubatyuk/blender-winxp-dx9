@@ -71,6 +71,7 @@ void D3D9Immediate::end()
   if (!d3d9_primitive(draw_prim, vert_len, type, prim_len)) {
     return;
   }
+  ctx->point_sprite_set(type == D3DPT_POINTLIST && d3d9_shader->point_sprite());
 
   D3D9VertexLayout layout;
   layout.init(vertex_format);

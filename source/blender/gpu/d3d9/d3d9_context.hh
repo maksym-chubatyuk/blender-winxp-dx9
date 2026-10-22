@@ -111,6 +111,9 @@ class D3D9Context : public Context {
   /** Set `gl_InstanceID` for the next draw (reserved constant `c0.w`). */
   void instance_id_set(int instance);
 
+  /** Rasterize the points of the next draws as sprites (see #D3D9Shader::point_sprite). */
+  void point_sprite_set(bool enable);
+
   /** Get or create the vertex declaration for the element list. */
   IDirect3DVertexDeclaration9 *vertex_declaration_get(const D3D9VertexDeclKey &key);
 
@@ -125,6 +128,8 @@ class D3D9Context : public Context {
   bool scene_open_ = false;
   /** Last reserved vertex constants sent by #draw_setup. */
   float4 reserved_constants_[D3D9_RESERVED_VS_CONSTANTS];
+  /** Last #D3DRS_POINTSPRITEENABLE value, -1 when unknown. */
+  int point_sprite_ = -1;
   Map<D3D9VertexDeclKey, IDirect3DVertexDeclaration9 *> vertex_decls_;
 };
 

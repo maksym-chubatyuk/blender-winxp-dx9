@@ -61,8 +61,12 @@ class D3D9FrameBuffer : public FrameBuffer {
     return !is_window_;
   }
 
-  /** Bind the render targets on the device if they changed, then viewport and scissor. */
-  void apply_state();
+  /**
+   * Bind the render targets on the device if they changed, then viewport and scissor.
+   * \param blending: The draw blends. Without MRT blending support only the first color target
+   * is bound then (the others only receive line data in the overlays, which isn't written).
+   */
+  void apply_state(bool blending = false);
   /** Force the next #apply_state to bind everything again. */
   void tag_dirty()
   {
@@ -87,6 +91,8 @@ class D3D9FrameBuffer : public FrameBuffer {
   bool is_window_ = false;
   IDirect3DSurface9 *window_surface_ = nullptr;
   bool dirty_targets_ = true;
+  /** Only the first color target is bound, see #apply_state. */
+  bool single_target_ = false;
   bool srgb_ = false;
   bool enabled_srgb_ = false;
 };

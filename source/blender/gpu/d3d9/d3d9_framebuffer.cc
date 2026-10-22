@@ -171,10 +171,16 @@ void D3D9FrameBuffer::to_device_rect(const int rect[4], RECT &r_rect) const
   r_rect.bottom = clamp_i(y + h, 0, height_);
 }
 
-void D3D9FrameBuffer::apply_state()
+void D3D9FrameBuffer::apply_state(const bool blending)
 {
   IDirect3DDevice9 *device = D3D9Backend::get()->device;
   D3D9Backend *backend = D3D9Backend::get();
+
+  const bool single_target = blending && !backend->supports_mrt_blending;
+  if (single_target != single_target_) {
+    single_target_ = single_target;
+    dirty_targets_ = true;
+  }
 
   if (dirty_attachments_) {
     update_attachments();
@@ -194,7 +200,7 @@ void D3D9FrameBuffer::apply_state()
     else {
       IDirect3DSurface9 *depth = depth_surface();
       for (int i = 0; i < max_targets; i++) {
-        IDirect3DSurface9 *surface = color_surface(i);
+        IDirect3DSurface9 *surface = (i > 0 && single_target_) ? nullptr : color_surface(i);
         if (i == 0 && surface == nullptr) {
           /* A render target is always needed. */
           surface = backend->dummy_color_target(max_ii(width_, 1), max_ii(height_, 1));

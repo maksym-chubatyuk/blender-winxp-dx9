@@ -47,6 +47,7 @@
 #include "BKE_image.hh"
 
 #include "GPU_batch.hh"
+#include "GPU_capabilities.hh"
 #include "GPU_debug.hh"
 #include "GPU_index_buffer.hh"
 #include "GPU_material.hh"
@@ -944,6 +945,12 @@ inline void PassBase<T>::draw_expand(gpu::Batch *batch,
     return;
   }
   BLI_assert(shader_);
+  if (GPU_max_shader_storage_buffer_bindings() == 0) {
+    /* The vertices can't be fetched from storage buffers: draw the batch primitives as they are
+     * (e.g. thin lines instead of expanded quads), the shaders of these backends expect it. */
+    this->draw(batch, instance_len, vertex_len, vertex_first, res_id, custom_id);
+    return;
+  }
   draw_commands_buf_.append_draw(headers_,
                                  commands_,
                                  batch,

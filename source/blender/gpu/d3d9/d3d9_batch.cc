@@ -177,6 +177,7 @@ void D3D9Batch::draw(int v_first, int v_count, int i_first, int i_count)
     }
     return;
   }
+  ctx->point_sprite_set(type == D3DPT_POINTLIST && shader->point_sprite());
   if (trace) {
     printf("  issue type=%d prims=%u v_first=%d inst=%d+%d ib=%p\n",
            int(type),
