@@ -305,6 +305,10 @@ static PyObject *pygpu_platform_backend_type_get(PyObject * /*self*/)
       backend = "OPENGL";
       break;
     }
+    case GPU_BACKEND_D3D9: {
+      backend = "D3D9";
+      break;
+    }
     case GPU_BACKEND_ANY:
       break;
   }

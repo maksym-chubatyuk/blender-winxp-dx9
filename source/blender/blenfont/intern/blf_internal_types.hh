@@ -174,6 +174,17 @@ struct GlyphCacheBLF {
   int bitmap_len_landed;
   int bitmap_len_alloc;
 
+  /**
+   * 2D glyph atlas, used instead of the linear bitmap above when the GPU has no storage buffers
+   * (Shader Model 2.0): glyphs are drawn as textured quads. Glyphs are packed in rows ("shelves").
+   */
+  gpu::Texture *atlas_texture = nullptr;
+  uchar *atlas_data = nullptr;
+  int atlas_size[2] = {0, 0};
+  int atlas_shelf[3] = {0, 0, 0}; /* X, Y and height of the current shelf. */
+  /** Rows modified since the last upload. */
+  int atlas_dirty_rows[2] = {INT_MAX, -1};
+
   ~GlyphCacheBLF();
 };
 
@@ -199,6 +210,8 @@ struct GlyphBLF {
 
   /** Position inside the texture where this glyph is store. */
   int offset;
+  /** Position of the glyph in #GlyphCacheBLF::atlas_data, -1 when not added. */
+  int atlas_pos[2] = {-1, -1};
 
   /**
    * Bitmap data, from freetype. Take care that this

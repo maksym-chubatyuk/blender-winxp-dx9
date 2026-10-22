@@ -42,6 +42,8 @@
 #include "BLF_api.hh"
 
 #include "GPU_batch.hh"
+#include "GPU_capabilities.hh"
+#include "GPU_immediate.hh"
 #include "GPU_matrix.hh"
 #include "GPU_state.hh"
 
@@ -305,9 +307,101 @@ static gpu::Texture *blf_batch_cache_texture_load()
   return gc->texture;
 }
 
+bool blf_use_glyph_atlas()
+{
+  return GPU_max_shader_storage_buffer_bindings() == 0;
+}
+
+static gpu::Texture *blf_atlas_texture_load(GlyphCacheBLF *gc)
+{
+  const int width = gc->atlas_size[0];
+  if (gc->atlas_texture == nullptr) {
+    gc->atlas_texture = GPU_texture_create_2d("blf_glyph_atlas",
+                                              width,
+                                              gc->atlas_size[1],
+                                              1,
+                                              gpu::TextureFormat::UNORM_8,
+                                              GPU_TEXTURE_USAGE_SHADER_READ,
+                                              nullptr);
+    GPU_texture_update(gc->atlas_texture, GPU_DATA_UBYTE, gc->atlas_data);
+  }
+  else if (gc->atlas_dirty_rows[1] > gc->atlas_dirty_rows[0]) {
+    const int y = gc->atlas_dirty_rows[0];
+    GPU_texture_update_sub(gc->atlas_texture,
+                           GPU_DATA_UBYTE,
+                           &gc->atlas_data[y * width],
+                           0,
+                           y,
+                           0,
+                           width,
+                           gc->atlas_dirty_rows[1] - y,
+                           0);
+  }
+  gc->atlas_dirty_rows[0] = INT_MAX;
+  gc->atlas_dirty_rows[1] = -1;
+  return gc->atlas_texture;
+}
+
+/** Draw the batched glyphs as textured quads from the 2D atlas of the glyph cache. */
+static void blf_batch_draw_atlas()
+{
+  GlyphCacheBLF *gc = g_batch.glyph_cache;
+  gpu::Texture *texture = blf_atlas_texture_load(gc);
+  const float inv_size[2] = {1.0f / float(gc->atlas_size[0]), 1.0f / float(gc->atlas_size[1])};
+
+  GPUVertFormat *format = immVertexFormat();
+  const uint pos = GPU_vertformat_attr_add(format, "pos", gpu::VertAttrType::SFLOAT_32_32);
+  const uint glyph = GPU_vertformat_attr_add(
+      format, "glyph", gpu::VertAttrType::SFLOAT_32_32_32_32);
+  const uint color = GPU_vertformat_attr_add(
+      format, "color", gpu::VertAttrType::SFLOAT_32_32_32_32);
+  immBindBuiltinProgram(GPU_SHADER_TEXT);
+  GPU_texture_bind(texture, 0);
+  /* The atlas size is passed with the uniforms of the buffer texture layout. */
+  immUniform1i("glyph_tex_width_mask", gc->atlas_size[0]);
+  immUniform1i("glyph_tex_width_shift", gc->atlas_size[1]);
+
+  immBegin(GPU_PRIM_TRIS, uint(g_batch.glyph_len) * 6);
+  for (int i = 0; i < g_batch.glyph_len; i++) {
+    const GlyphQuad &quad = g_batch.glyph_data[i];
+    const uint shadow = quad.flags & 0xFu;
+    /* Blur and outline need room around the glyph. */
+    const int expand = shadow > 4 ? 2 : (shadow > 0 ? 1 : 0);
+    const float atlas_x = float(quad.offset & 0xFFFF);
+    const float atlas_y = float(quad.offset >> 16);
+    /* `position` is (x min, y top, x max, y bottom). */
+    const float x[2] = {float(quad.position.x - expand), float(quad.position.z + expand)};
+    const float y[2] = {float(quad.position.y + expand), float(quad.position.w - expand)};
+    const float u[2] = {(atlas_x - float(expand)) * inv_size[0],
+                        (atlas_x + float(quad.glyph_size.x + expand)) * inv_size[0]};
+    const float v[2] = {(atlas_y - float(expand)) * inv_size[1],
+                        (atlas_y + float(quad.glyph_size.y + expand)) * inv_size[1]};
+    const int corners[6][2] = {{0, 0}, {1, 0}, {0, 1}, {0, 1}, {1, 0}, {1, 1}};
+    for (const auto &corner : corners) {
+      immAttr4f(glyph, u[corner[0]], v[corner[1]], float(shadow), 0.0f);
+      immAttr4fv(color, &quad.glyph_color.x);
+      immVertex2f(pos, x[corner[0]], y[corner[1]]);
+    }
+  }
+  immEnd();
+  immUnbindProgram();
+  GPU_texture_unbind(texture);
+}
+
 void blf_batch_draw()
 {
   if (g_batch.glyph_len == 0) {
+    return;
+  }
+
+  if (blf_use_glyph_atlas()) {
+    GPU_blend(GPU_BLEND_ALPHA);
+    if (blf_draw_cache_flush != nullptr) {
+      blf_draw_cache_flush();
+    }
+    blf_batch_draw_atlas();
+    GPU_blend(GPU_BLEND_NONE);
+    g_batch.glyph_len = 0;
     return;
   }
 

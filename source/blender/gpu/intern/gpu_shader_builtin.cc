@@ -229,8 +229,9 @@ gpu::Shader *GPU_shader_get_builtin_shader_with_config(GPUBuiltinShader shader,
        * Ideally this value should be set by the caller. */
       GPU_shader_bind(sh);
       GPU_shader_uniform_1i(sh, "lineSmooth", 1);
-      /* WORKAROUND: See is_polyline declaration. */
-      sh->is_polyline = true;
+      /* WORKAROUND: See is_polyline declaration.
+       * The D3D9 versions of these shaders draw regular (1 pixel wide) lines. */
+      sh->is_polyline = GPU_backend_get_type() != GPU_BACKEND_D3D9;
     }
   }
 

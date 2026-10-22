@@ -389,6 +389,10 @@ if(WITH_METAL_BACKEND)
   add_definitions(-DWITH_METAL_BACKEND)
 endif()
 
+if(WITH_D3D9_BACKEND)
+  add_definitions(-DWITH_D3D9_BACKEND)
+endif()
+
 if(WITH_VULKAN_BACKEND)
   add_definitions(-DWITH_VULKAN_BACKEND)
 endif()

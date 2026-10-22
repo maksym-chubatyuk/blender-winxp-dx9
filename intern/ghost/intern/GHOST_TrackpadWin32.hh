@@ -15,8 +15,12 @@
 
 #include "GHOST_Types.hh"
 
-#include <directmanipulation.h>
-#include <wrl.h>
+#ifndef __MINGW32__
+#  include <directmanipulation.h>
+#  include <wrl.h>
+#else
+#  include <windows.h>
+#endif
 
 #define PINCH_SCALE_FACTOR 125.0f
 
@@ -24,6 +28,25 @@ typedef struct {
   int32_t x, y, scale;
   bool isScrollDirectionInverted;
 } GHOST_TTrackpadInfo;
+
+#ifdef __MINGW32__
+/* MinGW's WRL lacks `RuntimeClass`. Direct Manipulation needs Windows 8 or newer anyway: no
+ * precision touch-pad support in MinGW builds. */
+class GHOST_DirectManipulationHelper {
+ public:
+  static GHOST_DirectManipulationHelper *create(HWND /*hWnd*/, uint16_t /*dpi*/)
+  {
+    return nullptr;
+  }
+  void update() {}
+  void onPointerHitTest(UINT32 /*pointerId*/) {}
+  void setDPI(uint16_t /*dpi*/) {}
+  GHOST_TTrackpadInfo getTrackpadInfo()
+  {
+    return {0, 0, 0, false};
+  }
+};
+#else
 
 class GHOST_DirectManipulationHelper;
 
@@ -138,3 +161,5 @@ class GHOST_DirectManipulationHelper {
 
   bool is_scroll_direction_inverted_;
 };
+
+#endif /* __MINGW32__ */

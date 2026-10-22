@@ -26,6 +26,8 @@
 #include <commctrl.h>
 #include <objbase.h>
 #include <shlobj.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* -------------------------------------------------------------------- */
@@ -106,6 +108,47 @@ static BOOL WINAPI xp_UnmapViewOfFileEx(PVOID base_address, ULONG unmap_flags)
   return UnmapViewOfFile(base_address);
 }
 XP_EXPORT(UnmapViewOfFileEx, 8)
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name shcore.dll
+ * \{ */
+
+/* Windows 8.1+ (the `PROCESS_DPI_AWARENESS` and `MONITOR_DPI_TYPE` enums are passed as int). */
+static HRESULT WINAPI xp_SetProcessDpiAwareness(int value)
+{
+  static HRESULT(WINAPI * real)(int) = (HRESULT(WINAPI *)(int))1;
+  XP_RESOLVE(real, "shcore.dll", "SetProcessDpiAwareness");
+  if (real) {
+    return real(value);
+  }
+  /* Vista's system wide DPI awareness, nothing to do on XP. */
+  static BOOL(WINAPI * set_dpi_aware)(void) = (BOOL(WINAPI *)(void))1;
+  XP_RESOLVE(set_dpi_aware, "user32.dll", "SetProcessDPIAware");
+  if (value != 0 && set_dpi_aware) {
+    set_dpi_aware();
+  }
+  return S_OK;
+}
+XP_EXPORT(SetProcessDpiAwareness, 4)
+
+/* Windows 8.1+. XP has a single DPI for all monitors. */
+static HRESULT WINAPI xp_GetDpiForMonitor(HMONITOR monitor, int type, UINT *r_dpi_x, UINT *r_dpi_y)
+{
+  static HRESULT(WINAPI * real)(HMONITOR, int, UINT *, UINT *) =
+      (HRESULT(WINAPI *)(HMONITOR, int, UINT *, UINT *))1;
+  XP_RESOLVE(real, "shcore.dll", "GetDpiForMonitor");
+  if (real) {
+    return real(monitor, type, r_dpi_x, r_dpi_y);
+  }
+  HDC dc = GetDC(NULL);
+  *r_dpi_x = (UINT)GetDeviceCaps(dc, LOGPIXELSX);
+  *r_dpi_y = (UINT)GetDeviceCaps(dc, LOGPIXELSY);
+  ReleaseDC(NULL, dc);
+  return S_OK;
+}
+XP_EXPORT(GetDpiForMonitor, 16)
 
 /** \} */
 
@@ -250,5 +293,77 @@ static HRESULT WINAPI xp_TaskDialogIndirect(const TASKDIALOGCONFIG *config,
   return S_OK;
 }
 XP_EXPORT(TaskDialogIndirect, 16)
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Hang watchdog
+ *
+ * Debugging aid, there is no working debugger on the XP machine: with `XP_WATCHDOG=<seconds>`
+ * set, a thread periodically suspends the main thread and appends its instruction pointer and
+ * every stack value pointing into the executable's code to `xp_watchdog.txt` (in the current
+ * directory). The real call chain is a subset of these, resolve them with `addr2line`.
+ * \{ */
+
+static HANDLE xp_watchdog_main_thread = NULL;
+static DWORD xp_watchdog_interval_ms = 0;
+
+static DWORD WINAPI xp_watchdog_thread(LPVOID unused)
+{
+  (void)unused;
+  const IMAGE_DOS_HEADER *dos = (const IMAGE_DOS_HEADER *)GetModuleHandleA(NULL);
+  const IMAGE_NT_HEADERS *nt = (const IMAGE_NT_HEADERS *)((const char *)dos + dos->e_lfanew);
+  const DWORD image_start = (DWORD)dos;
+  const DWORD image_end = image_start + nt->OptionalHeader.SizeOfImage;
+  for (int dump = 0;; dump++) {
+    Sleep(xp_watchdog_interval_ms);
+    FILE *f = fopen("xp_watchdog.txt", "a");
+    if (!f) {
+      continue;
+    }
+    CONTEXT ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.ContextFlags = CONTEXT_FULL;
+    SuspendThread(xp_watchdog_main_thread);
+    if (GetThreadContext(xp_watchdog_main_thread, &ctx)) {
+      fprintf(f, "dump %d eip 0x%08lx esp 0x%08lx\n", dump, ctx.Eip, ctx.Esp);
+      MEMORY_BASIC_INFORMATION mbi;
+      if (VirtualQuery((LPCVOID)ctx.Esp, &mbi, sizeof(mbi))) {
+        const DWORD *sp = (const DWORD *)ctx.Esp;
+        const DWORD *end = (const DWORD *)((const char *)mbi.BaseAddress + mbi.RegionSize);
+        for (int n = 0; sp < end && n < 4000; sp++) {
+          if (*sp >= image_start && *sp < image_end) {
+            fprintf(f, "0x%08lx\n", *sp);
+            n++;
+          }
+        }
+      }
+    }
+    ResumeThread(xp_watchdog_main_thread);
+    fprintf(f, "end\n");
+    fclose(f);
+  }
+  return 0;
+}
+
+__attribute__((constructor)) static void xp_watchdog_init(void)
+{
+  char value[16];
+  if (!GetEnvironmentVariableA("XP_WATCHDOG", value, sizeof(value))) {
+    return;
+  }
+  xp_watchdog_interval_ms = (DWORD)atoi(value) * 1000;
+  if (xp_watchdog_interval_ms == 0) {
+    return;
+  }
+  DuplicateHandle(GetCurrentProcess(),
+                  GetCurrentThread(),
+                  GetCurrentProcess(),
+                  &xp_watchdog_main_thread,
+                  THREAD_ALL_ACCESS,
+                  FALSE,
+                  0);
+  CreateThread(NULL, 0, xp_watchdog_thread, NULL, 0, NULL);
+}
 
 /** \} */

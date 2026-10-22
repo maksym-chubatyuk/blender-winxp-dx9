@@ -1,0 +1,38 @@
+# Direct3D 9 versions of Blender shaders: <create info name> <file.hlsl> [DEFINE[=value]...]
+# See d3d9_common.hlsl for the conventions.
+
+gpu_shader_3D_uniform_color                    gpu_shader_3D_color.hlsl UNIFORM_COLOR
+gpu_shader_3D_uniform_color_clipped            gpu_shader_3D_color.hlsl UNIFORM_COLOR
+gpu_shader_3D_clipped_uniform_color            gpu_shader_3D_color.hlsl UNIFORM_COLOR
+gpu_shader_3D_flat_color                       gpu_shader_3D_color.hlsl
+gpu_shader_3D_flat_color_clipped               gpu_shader_3D_color.hlsl
+gpu_shader_3D_smooth_color                     gpu_shader_3D_color.hlsl
+gpu_shader_3D_smooth_color_clipped             gpu_shader_3D_color.hlsl
+gpu_shader_3D_polyline_uniform_color           gpu_shader_3D_color.hlsl UNIFORM_COLOR
+gpu_shader_3D_polyline_uniform_color_clipped   gpu_shader_3D_color.hlsl UNIFORM_COLOR
+gpu_shader_3D_polyline_flat_color              gpu_shader_3D_color.hlsl
+gpu_shader_3D_polyline_smooth_color            gpu_shader_3D_color.hlsl
+gpu_shader_3D_point_flat_color                 gpu_shader_3D_color.hlsl POINT_SIZE
+gpu_shader_3D_point_uniform_color              gpu_shader_3D_color.hlsl UNIFORM_COLOR POINT_SIZE
+
+gpu_shader_3D_image                            gpu_shader_image.hlsl
+gpu_shader_3D_image_scene_linear               gpu_shader_image.hlsl SCENE_LINEAR
+gpu_shader_3D_image_color                      gpu_shader_image.hlsl USE_COLOR
+gpu_shader_3D_image_color_scene_linear         gpu_shader_image.hlsl USE_COLOR SCENE_LINEAR
+gpu_shader_2D_image_desaturate_color           gpu_shader_image.hlsl USE_COLOR DESATURATE
+
+gpu_shader_2D_widget_base                      gpu_shader_2D_widget.hlsl
+gpu_shader_2D_widget_base_inst                 gpu_shader_2D_widget.hlsl INSTANCED
+gpu_shader_2D_widget_shadow                    gpu_shader_2D_widget_shadow.hlsl
+gpu_shader_2D_area_borders                     gpu_shader_2D_area_borders.hlsl
+gpu_shader_icon                                gpu_shader_icon.hlsl ICON
+gpu_shader_icon_multi                          gpu_shader_icon.hlsl MULTI
+gpu_shader_2D_image_rect_color                 gpu_shader_icon.hlsl RECT_COLOR
+gpu_shader_2D_checker                          gpu_shader_2D_pattern.hlsl CHECKER
+gpu_shader_2D_diag_stripes                     gpu_shader_2D_pattern.hlsl STRIPES
+gpu_shader_3D_line_dashed_uniform_color        gpu_shader_line_dashed.hlsl
+gpu_shader_3D_line_dashed_uniform_color_clipped gpu_shader_line_dashed.hlsl
+gpu_shader_text                                gpu_shader_text.hlsl
+
+# Backend internal shaders.
+d3d9_internal_blit                             d3d9_internal_blit.hlsl

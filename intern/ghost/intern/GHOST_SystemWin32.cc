@@ -41,7 +41,12 @@
 #include "GHOST_WindowManager.hh"
 #include "GHOST_WindowWin32.hh"
 
-#include "GHOST_ContextD3D.hh"
+#ifdef WITH_OPENGL_BACKEND
+#  include "GHOST_ContextD3D.hh"
+#endif
+#ifdef WITH_D3D9_BACKEND
+#  include "GHOST_ContextD3D9.hh"
+#endif
 #ifdef WITH_OPENGL_BACKEND
 #  include "GHOST_ContextWGL.hh"
 #endif
@@ -350,6 +355,18 @@ GHOST_IContext *GHOST_SystemWin32::createOffscreenContext(GHOST_GPUSettings gpu_
       return nullptr;
     }
 #endif
+
+#ifdef WITH_D3D9_BACKEND
+    case GHOST_kDrawingContextTypeD3D9: {
+      GHOST_Context *context = new GHOST_ContextD3D9(context_params_offscreen, nullptr);
+      if (context->initializeDrawingContext()) {
+        return context;
+      }
+      delete context;
+      return nullptr;
+    }
+#endif
+
     default:
       /* Unsupported backend. */
       return nullptr;
@@ -368,6 +385,7 @@ GHOST_TSuccess GHOST_SystemWin32::disposeContext(GHOST_IContext *context)
   return GHOST_kSuccess;
 }
 
+#ifdef WITH_OPENGL_BACKEND
 /**
  * Create a new off-screen DirectX 11 context.
  * Never explicitly delete the window, use #disposeContext() instead.
@@ -403,6 +421,8 @@ GHOST_TSuccess GHOST_SystemWin32::disposeContextD3D(GHOST_ContextD3D *context)
 
   return GHOST_kSuccess;
 }
+
+#endif
 
 bool GHOST_SystemWin32::processEvents(bool waitForEvent)
 {

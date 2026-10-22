@@ -82,6 +82,10 @@ if(WITH_OPENGL_BACKEND)
   add_definitions(-DWITH_OPENGL_BACKEND)
 endif()
 
+if(WITH_D3D9_BACKEND)
+  add_definitions(-DWITH_D3D9_BACKEND)
+endif()
+
 if(WITH_VULKAN_BACKEND)
   list(APPEND SRC
     intern/GHOST_ContextVK.cc
@@ -431,14 +435,12 @@ elseif(WIN32)
   )
 
   list(APPEND SRC
-    intern/GHOST_ContextD3D.cc
     intern/GHOST_DropTargetWin32.cc
     intern/GHOST_SystemWin32.cc
     intern/GHOST_TrackpadWin32.cc
     intern/GHOST_WindowWin32.cc
     intern/GHOST_Wintab.cc
 
-    intern/GHOST_ContextD3D.hh
     intern/GHOST_DropTargetWin32.hh
     intern/GHOST_SystemWin32.hh
     intern/GHOST_TaskbarWin32.hh
@@ -447,11 +449,33 @@ elseif(WIN32)
     intern/GHOST_Wintab.hh
   )
 
-  list(APPEND SRC
-    intern/GHOST_ContextWGL.cc
+  # The Direct3D 11 context is only used for OpenGL interop (OpenXR).
+  if(WITH_OPENGL_BACKEND)
+    list(APPEND SRC
+      intern/GHOST_ContextD3D.cc
 
-    intern/GHOST_ContextWGL.hh
-  )
+      intern/GHOST_ContextD3D.hh
+    )
+  endif()
+
+  if(WITH_D3D9_BACKEND)
+    list(APPEND SRC
+      intern/GHOST_ContextD3D9.cc
+
+      intern/GHOST_ContextD3D9.hh
+    )
+    list(APPEND LIB
+      PRIVATE d3d9
+    )
+  endif()
+
+  if(WITH_OPENGL_BACKEND)
+    list(APPEND SRC
+      intern/GHOST_ContextWGL.cc
+
+      intern/GHOST_ContextWGL.hh
+    )
+  endif()
 
   if(WITH_INPUT_IME)
     list(APPEND SRC

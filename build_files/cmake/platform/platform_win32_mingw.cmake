@@ -177,3 +177,6 @@ configure_file(
   ${CMAKE_CURRENT_BINARY_DIR}/tests.exe.manifest
   @ONLY
 )
+
+# Wintab tablet API headers ship with the sources.
+set(WINTAB_INC ${CMAKE_SOURCE_DIR}/extern/wintab/include)

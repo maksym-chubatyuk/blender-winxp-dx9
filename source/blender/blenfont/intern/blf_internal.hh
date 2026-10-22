@@ -69,6 +69,8 @@ extern FontBLF *global_font[BLF_MAX_FONT];
 
 void blf_batch_draw_begin(FontBLF *font);
 void blf_batch_draw();
+/** Glyphs are drawn as textured quads from a 2D atlas (no storage buffers on the GPU). */
+bool blf_use_glyph_atlas();
 
 /**
  * Some font have additional file with metrics information,

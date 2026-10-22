@@ -28,7 +28,7 @@
 #define PACKETMODE 0
 #include <pktdef.h>
 
-#if !defined(_MSVC_TRADITIONAL) || _MSVC_TRADITIONAL
+#if (!defined(_MSVC_TRADITIONAL) || _MSVC_TRADITIONAL) && !defined(__GNUC__)
 #  define WINTAB_PRINTF(x, ...) \
     { \
       if (GHOST_Wintab::getDebug()) { \

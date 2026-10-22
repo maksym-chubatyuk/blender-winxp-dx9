@@ -45,6 +45,9 @@
 #ifdef WITH_METAL_BACKEND
 #  include "mtl_backend.hh"
 #endif
+#ifdef WITH_D3D9_BACKEND
+#  include "d3d9_backend.hh"
+#endif
 #include "dummy_backend.hh"
 
 #include "draw_debug.hh"
@@ -456,6 +459,8 @@ static const char *gpu_backend_type_name(const GPUBackendType backend_type)
       return "Vulkan";
     case GPU_BACKEND_METAL:
       return "Metal";
+    case GPU_BACKEND_D3D9:
+      return "Direct3D 9";
     case GPU_BACKEND_NONE:
       return "None";
     case GPU_BACKEND_ANY:
@@ -476,8 +481,18 @@ bool GPU_backend_type_selection_detect()
 {
   VectorSet<GPUBackendType> backends_to_check;
   if (g_backend_type_override.has_value()) {
-    backends_to_check.add(*g_backend_type_override);
+#if defined(WITH_D3D9_BACKEND)
+    /* The preferences default to a backend this build may not have, don't report a fallback when
+     * the override names a backend which isn't compiled in. */
+    if (*g_backend_type_override == GPU_BACKEND_D3D9)
+#endif
+    {
+      backends_to_check.add(*g_backend_type_override);
+    }
   }
+#if defined(WITH_D3D9_BACKEND)
+  backends_to_check.add(GPU_BACKEND_D3D9);
+#endif
 #if defined(WITH_OPENGL_BACKEND)
   backends_to_check.add(GPU_BACKEND_OPENGL);
 #elif defined(WITH_METAL_BACKEND)
@@ -529,6 +544,12 @@ static bool gpu_backend_supported()
 #else
       return false;
 #endif
+    case GPU_BACKEND_D3D9:
+#ifdef WITH_D3D9_BACKEND
+      return D3D9Backend::is_supported();
+#else
+      return false;
+#endif
     case GPU_BACKEND_NONE:
       return true;
     default:
@@ -564,6 +585,11 @@ static void gpu_backend_create()
 #ifdef WITH_METAL_BACKEND
     case GPU_BACKEND_METAL:
       g_backend = MEM_new<MTLBackend>(__func__);
+      break;
+#endif
+#ifdef WITH_D3D9_BACKEND
+    case GPU_BACKEND_D3D9:
+      g_backend = MEM_new<D3D9Backend>(__func__);
       break;
 #endif
     case GPU_BACKEND_NONE:
@@ -615,6 +641,12 @@ GPUBackendType GPU_backend_get_type()
   }
 #endif
 
+#ifdef WITH_D3D9_BACKEND
+  if (g_backend && dynamic_cast<D3D9Backend *>(g_backend) != nullptr) {
+    return GPU_BACKEND_D3D9;
+  }
+#endif
+
   return GPU_BACKEND_NONE;
 }
 
@@ -650,6 +682,10 @@ static GHOST_TDrawingContextType ghost_context_type()
 #ifdef WITH_METAL_BACKEND
     case GPU_BACKEND_METAL:
       return GHOST_kDrawingContextTypeMetal;
+#endif
+#ifdef WITH_D3D9_BACKEND
+    case GPU_BACKEND_D3D9:
+      return GHOST_kDrawingContextTypeD3D9;
 #endif
     default:
       BLI_assert_unreachable();

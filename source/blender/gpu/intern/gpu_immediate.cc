@@ -126,6 +126,10 @@ static void wide_line_workaround_start(GPUPrimType prim_type)
   if (!ELEM(prim_type, GPU_PRIM_LINES, GPU_PRIM_LINE_STRIP, GPU_PRIM_LINE_LOOP)) {
     return;
   }
+  if (GPU_backend_get_type() == GPU_BACKEND_D3D9) {
+    /* No shader based wide lines on Shader Model 2.0 hardware. */
+    return;
+  }
 
   float line_width = GPU_line_width_get();
 

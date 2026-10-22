@@ -278,6 +278,7 @@ enum GHOST_TDrawingContextType {
 #endif
 #ifdef WIN32
   GHOST_kDrawingContextTypeD3D,
+  GHOST_kDrawingContextTypeD3D9,
 #endif
 #if defined(__APPLE__) && defined(WITH_METAL_BACKEND)
   GHOST_kDrawingContextTypeMetal,
@@ -1020,6 +1021,21 @@ struct GHOST_VulkanHandles {
 };
 
 #endif
+
+/**
+ * Return argument passed to #GHOST_IContext::getD3D9Handles.
+ *
+ * All windows share one Direct3D 9 device, each window context presents its own swap chain.
+ */
+struct GHOST_D3D9Handles {
+  /** The shared `IDirect3DDevice9`. */
+  void *device;
+  /** Back buffer `IDirect3DSurface9` of the window swap chain, null for off-screen contexts. */
+  void *back_buffer;
+  /** Size of the back buffer. */
+  int width;
+  int height;
+};
 
 enum GHOST_TDebugFlags {
   /** Axis that cursor grab will wrap. */

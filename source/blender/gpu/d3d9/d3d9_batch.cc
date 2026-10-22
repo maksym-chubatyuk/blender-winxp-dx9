@@ -1,0 +1,242 @@
+/* SPDX-FileCopyrightText: 2026 Blender Authors
+ *
+ * SPDX-License-Identifier: GPL-2.0-or-later */
+
+/** \file
+ * \ingroup gpu
+ */
+
+#include <algorithm>
+
+#include "GPU_vertex_format.hh"
+
+#include "gpu_shader_interface.hh"
+
+#include "d3d9_backend.hh"
+#include "d3d9_batch.hh"
+#include "d3d9_buffers.hh"
+#include "d3d9_context.hh"
+#include "d3d9_index_buffer.hh"
+#include "d3d9_shader.hh"
+#include "d3d9_vertex_buffer.hh"
+
+namespace blender::gpu {
+
+bool d3d9_primitive(GPUPrimType prim_type,
+                    uint vert_len,
+                    D3DPRIMITIVETYPE &r_type,
+                    uint &r_prim_len)
+{
+  switch (prim_type) {
+    case GPU_PRIM_POINTS:
+      r_type = D3DPT_POINTLIST;
+      r_prim_len = vert_len;
+      break;
+    case GPU_PRIM_LINES:
+      r_type = D3DPT_LINELIST;
+      r_prim_len = vert_len / 2;
+      break;
+    case GPU_PRIM_LINE_STRIP:
+    case GPU_PRIM_LINE_LOOP:
+      r_type = D3DPT_LINESTRIP;
+      r_prim_len = vert_len > 1 ? vert_len - 1 : 0;
+      break;
+    case GPU_PRIM_TRIS:
+      r_type = D3DPT_TRIANGLELIST;
+      r_prim_len = vert_len / 3;
+      break;
+    case GPU_PRIM_TRI_STRIP:
+      r_type = D3DPT_TRIANGLESTRIP;
+      r_prim_len = vert_len > 2 ? vert_len - 2 : 0;
+      break;
+    case GPU_PRIM_TRI_FAN:
+      r_type = D3DPT_TRIANGLEFAN;
+      r_prim_len = vert_len > 2 ? vert_len - 2 : 0;
+      break;
+    default:
+      /* Adjacency primitives need geometry shaders. */
+      return false;
+  }
+  return r_prim_len > 0;
+}
+
+bool D3D9Batch::bind_vertex_streams(D3D9Shader *shader)
+{
+  D3D9Context *ctx = D3D9Context::get();
+  D3D9Backend *backend = D3D9Backend::get();
+  IDirect3DDevice9 *device = ctx->device;
+  const ShaderInterface *interface = shader->interface;
+  const uint16_t inputs = shader->vertex_inputs_get();
+
+  D3D9VertexDeclKey key;
+  uint16_t bound = 0;
+  int stream = 0;
+  for (int v = 0; v < GPU_BATCH_VBO_MAX_LEN; v++) {
+    D3D9VertBuf *vbo = static_cast<D3D9VertBuf *>(verts[v]);
+    if (vbo == nullptr) {
+      continue;
+    }
+    IDirect3DVertexBuffer9 *buffer = vbo->buffer_get();
+    if (buffer == nullptr) {
+      continue;
+    }
+    const D3D9VertexLayout &layout = vbo->layout_get();
+    bool used = false;
+    for (uint a_idx = 0; a_idx < vbo->format.attr_len; a_idx++) {
+      const GPUVertAttr &a = vbo->format.attrs[a_idx];
+      for (uint n_idx = 0; n_idx < a.name_len; n_idx++) {
+        const char *name = GPU_vertformat_attr_name_get(&vbo->format, &a, n_idx);
+        const ShaderInput *input = interface->attr_get(name);
+        if (input == nullptr || input->location < 0) {
+          continue;
+        }
+        const int loc = input->location;
+        if (!(inputs & (1 << loc)) || (bound & (1 << loc))) {
+          continue;
+        }
+        key.elements.append({WORD(stream),
+                             WORD(layout.attrs[a_idx].offset),
+                             BYTE(layout.attrs[a_idx].type),
+                             D3DDECLMETHOD_DEFAULT,
+                             D3DDECLUSAGE_TEXCOORD,
+                             BYTE(loc)});
+        bound |= 1 << loc;
+        used = true;
+      }
+    }
+    if (used) {
+      device->SetStreamSource(stream, buffer, 0, layout.stride);
+      stream++;
+    }
+  }
+
+  if (shader->uses_vertex_id()) {
+    key.elements.append({WORD(stream),
+                         0,
+                         D3DDECLTYPE_FLOAT1,
+                         D3DDECLMETHOD_DEFAULT,
+                         D3DDECLUSAGE_TEXCOORD,
+                         BYTE(D3D9_VERTEX_ID_ATTR)});
+    device->SetStreamSource(stream, backend->vertex_id_buffer(), 0, sizeof(float));
+    stream++;
+  }
+
+  /* Inputs without data read a constant white (OpenGL reads a constant attribute value). */
+  const uint16_t missing = inputs & ~bound & ~(1 << D3D9_VERTEX_ID_ATTR);
+  if (missing) {
+    for (int loc = 0; loc < 16; loc++) {
+      if (missing & (1 << loc)) {
+        key.elements.append({WORD(stream),
+                             0,
+                             D3DDECLTYPE_D3DCOLOR,
+                             D3DDECLMETHOD_DEFAULT,
+                             D3DDECLUSAGE_TEXCOORD,
+                             BYTE(loc)});
+      }
+    }
+    device->SetStreamSource(stream, backend->default_attr_buffer(), 0, sizeof(D3DCOLOR));
+    stream++;
+  }
+
+  if (key.elements.is_empty()) {
+    return false;
+  }
+  IDirect3DVertexDeclaration9 *decl = ctx->vertex_declaration_get(key);
+  if (decl == nullptr) {
+    return false;
+  }
+  device->SetVertexDeclaration(decl);
+  return true;
+}
+
+void D3D9Batch::draw(int v_first, int v_count, int i_first, int i_count)
+{
+  D3D9Context *ctx = D3D9Context::get();
+  D3D9Shader *shader = static_cast<D3D9Shader *>(ctx->shader);
+  if (v_count <= 0 || i_count <= 0) {
+    return;
+  }
+  if (!ctx->draw_setup()) {
+    return;
+  }
+  if (!bind_vertex_streams(shader)) {
+    return;
+  }
+  D3DPRIMITIVETYPE type;
+  uint prim_len;
+  if (!d3d9_primitive(prim_type, v_count, type, prim_len)) {
+    return;
+  }
+
+  IDirect3DDevice9 *device = ctx->device;
+  D3D9IndexBuf *ib = static_cast<D3D9IndexBuf *>(elem);
+  IDirect3DIndexBuffer9 *ibo = ib ? ib->buffer_get() : nullptr;
+  if (ib && ibo == nullptr) {
+    return;
+  }
+
+  /* Vertex range addressed by the indices. */
+  uint vert_range = D3D9_VERTEX_ID_LEN;
+  if (verts[0]) {
+    vert_range = verts[0]->vertex_len;
+  }
+
+  const bool close_loop = prim_type == GPU_PRIM_LINE_LOOP && v_count > 2 && ib == nullptr;
+
+  for (int instance = i_first; instance < i_first + i_count; instance++) {
+    if (instance != 0 || i_count > 1) {
+      ctx->instance_id_set(instance);
+    }
+    if (ib) {
+      device->SetIndices(ibo);
+      device->DrawIndexedPrimitive(
+          type, INT(ib->index_base_get()), 0, vert_range, ib->draw_start_get() + v_first, prim_len);
+    }
+    else {
+      device->DrawPrimitive(type, v_first, prim_len);
+      if (close_loop) {
+        IDirect3DIndexBuffer9 *loop_ibo = D3D9Backend::get()->line_loop_index_buffer();
+        if (loop_ibo) {
+          device->SetIndices(loop_ibo);
+          device->DrawIndexedPrimitive(
+              D3DPT_LINELIST, v_first, 0, v_count, (v_count - 1) * 2, 1);
+        }
+      }
+    }
+  }
+  if (i_count > 1 || i_first != 0) {
+    ctx->instance_id_set(0);
+  }
+}
+
+void D3D9Batch::draw_indirect(StorageBuf *indirect_buf, intptr_t offset)
+{
+  /* Indirect arguments live in host memory. */
+  const D3D9StorageBuf *buf = static_cast<D3D9StorageBuf *>(indirect_buf);
+  const uint8_t *data = buf->data_get();
+  if (data == nullptr) {
+    return;
+  }
+  if (elem) {
+    /* DrawElementsIndirectCommand: count, instance_count, first_index, base_vertex, base_inst. */
+    const uint32_t *cmd = reinterpret_cast<const uint32_t *>(data + offset);
+    draw(int(cmd[2]), int(cmd[0]), int(cmd[4]), int(cmd[1]));
+  }
+  else {
+    /* DrawArraysIndirectCommand: count, instance_count, first, base_instance. */
+    const uint32_t *cmd = reinterpret_cast<const uint32_t *>(data + offset);
+    draw(int(cmd[2]), int(cmd[0]), int(cmd[3]), int(cmd[1]));
+  }
+}
+
+void D3D9Batch::multi_draw_indirect(StorageBuf *indirect_buf,
+                                    int count,
+                                    intptr_t offset,
+                                    intptr_t stride)
+{
+  for (int i = 0; i < count; i++) {
+    draw_indirect(indirect_buf, offset + i * stride);
+  }
+}
+
+}  // namespace blender::gpu

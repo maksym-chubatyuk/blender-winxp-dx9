@@ -156,6 +156,12 @@ GlyphCacheBLF::~GlyphCacheBLF()
   if (this->bitmap_result) {
     MEM_delete(this->bitmap_result);
   }
+  if (this->atlas_texture) {
+    GPU_texture_free(this->atlas_texture);
+  }
+  if (this->atlas_data) {
+    MEM_delete(this->atlas_data);
+  }
 }
 
 void blf_glyph_cache_clear(FontBLF *font)
@@ -1476,6 +1482,73 @@ static void blf_glyph_calc_rect_shadow(
 /** \name Glyph Drawing
  * \{ */
 
+/**
+ * Add the glyph to the 2D atlas of the cache, see #blf_use_glyph_atlas.
+ * Returns false when the glyph can't be drawn this way.
+ */
+static bool blf_glyph_atlas_add(FontBLF *font, GlyphCacheBLF *gc, GlyphBLF *g)
+{
+  /* Room for the blur and outline of shadows, and bilinear filtering. */
+  constexpr int pad = 2;
+  /* Color glyphs (emoji) are not supported. */
+  if (g->num_channels != 1) {
+    return false;
+  }
+  const int w = g->dims[0] + pad * 2;
+  const int h = g->dims[1] + pad * 2;
+  if (gc->atlas_data == nullptr) {
+    gc->atlas_size[0] = 512;
+    gc->atlas_size[1] = 128;
+    gc->atlas_data = MEM_new_array_zeroed<uchar>(size_t(gc->atlas_size[0] * gc->atlas_size[1]),
+                                                 __func__);
+  }
+  int *shelf = gc->atlas_shelf;
+  if (w > gc->atlas_size[0]) {
+    return false;
+  }
+  if (shelf[0] + w > gc->atlas_size[0]) {
+    /* Start a new shelf. */
+    shelf[0] = 0;
+    shelf[1] += shelf[2];
+    shelf[2] = 0;
+  }
+  if (shelf[1] + h > gc->atlas_size[1]) {
+    /* Grow: double the height, the texture is created again with all the data. */
+    int new_height = gc->atlas_size[1];
+    while (shelf[1] + h > new_height) {
+      new_height *= 2;
+    }
+    if (font->tex_size_max == -1) {
+      font->tex_size_max = GPU_max_texture_size();
+    }
+    if (new_height > font->tex_size_max) {
+      return false;
+    }
+    uchar *data = MEM_new_array_zeroed<uchar>(size_t(gc->atlas_size[0] * new_height), __func__);
+    memcpy(data, gc->atlas_data, size_t(gc->atlas_size[0] * gc->atlas_size[1]));
+    MEM_delete(gc->atlas_data);
+    gc->atlas_data = data;
+    gc->atlas_size[1] = new_height;
+    if (gc->atlas_texture) {
+      GPU_texture_free(gc->atlas_texture);
+      gc->atlas_texture = nullptr;
+    }
+  }
+
+  g->atlas_pos[0] = shelf[0] + pad;
+  g->atlas_pos[1] = shelf[1] + pad;
+  for (int y = 0; y < g->dims[1]; y++) {
+    memcpy(&gc->atlas_data[(g->atlas_pos[1] + y) * gc->atlas_size[0] + g->atlas_pos[0]],
+           &g->bitmap[y * g->dims[0]],
+           size_t(g->dims[0]));
+  }
+  gc->atlas_dirty_rows[0] = std::min(gc->atlas_dirty_rows[0], g->atlas_pos[1]);
+  gc->atlas_dirty_rows[1] = std::max(gc->atlas_dirty_rows[1], g->atlas_pos[1] + g->dims[1]);
+  shelf[0] += w;
+  shelf[2] = std::max(shelf[2], h);
+  return true;
+}
+
 static void blf_texture_draw(const GlyphBLF *g,
                              const uchar color[4],
                              const FontShadowType shadow,
@@ -1491,7 +1564,9 @@ static void blf_texture_draw(const GlyphBLF *g,
       x1 + g_batch.ofs[0], y1 + g_batch.ofs[1], x2 + g_batch.ofs[0], y2 + g_batch.ofs[1]);
   glyph_data.glyph_color = float4(UNPACK4(color)) / 255.0f;
   glyph_data.glyph_size = int2(g->dims);
-  glyph_data.offset = g->offset;
+  /* The atlas position is packed in the offset when drawing from the 2D atlas. */
+  glyph_data.offset = (g->atlas_pos[0] >= 0) ? (g->atlas_pos[1] << 16 | g->atlas_pos[0]) :
+                                                g->offset;
   /* Glyph flags packs color channel count and shadow type. */
   glyph_data.flags = uint32_t(shadow) | (uint32_t(g->num_channels) << 4);
 
@@ -1507,7 +1582,13 @@ void blf_glyph_draw(FontBLF *font, GlyphCacheBLF *gc, GlyphBLF *g, const int x, 
     return;
   }
 
-  if (g->glyph_cache == nullptr) {
+  if (g->glyph_cache == nullptr && blf_use_glyph_atlas()) {
+    if (!blf_glyph_atlas_add(font, gc, g)) {
+      return;
+    }
+    g->glyph_cache = gc;
+  }
+  else if (g->glyph_cache == nullptr) {
     if (font->tex_size_max == -1) {
       font->tex_size_max = GPU_max_texture_size();
     }

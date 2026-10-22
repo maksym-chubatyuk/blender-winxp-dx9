@@ -8,7 +8,12 @@
 
 #include <algorithm>
 
-#include "GHOST_ContextD3D.hh"
+#ifdef WITH_OPENGL_BACKEND
+#  include "GHOST_ContextD3D.hh"
+#endif
+#ifdef WITH_D3D9_BACKEND
+#  include "GHOST_ContextD3D9.hh"
+#endif
 #include "GHOST_ContextNone.hh"
 #include "GHOST_DropTargetWin32.hh"
 #include "GHOST_SystemWin32.hh"
@@ -130,6 +135,17 @@ GHOST_WindowWin32::GHOST_WindowWin32(GHOST_SystemWin32 *system,
   h_DC_ = ::GetDC(h_wnd_);
 
   if (!setDrawingContextType(type)) {
+#ifdef WITH_D3D9_BACKEND
+    if (type == GHOST_kDrawingContextTypeD3D9) {
+      MessageBox(h_wnd_,
+                 "A graphics card and driver with support for Direct3D 9 is required.\n\n"
+                 "Installing DirectX 9.0c and the latest driver for your graphics card might "
+                 "resolve the issue.",
+                 "Blender - Unsupported Graphics Card Configuration",
+                 MB_OK | MB_ICONERROR);
+    }
+#endif
+#ifdef WITH_OPENGL_BACKEND
     if (type == GHOST_kDrawingContextTypeOpenGL) {
       const char *title = "Blender - Unsupported Graphics Card Configuration";
       const char *text = "";
@@ -160,6 +176,7 @@ GHOST_WindowWin32::GHOST_WindowWin32(GHOST_SystemWin32 *system,
       }
       MessageBox(h_wnd_, text, title, MB_OK | MB_ICONERROR);
     }
+#endif
     ::ReleaseDC(h_wnd_, h_DC_);
     ::DestroyWindow(h_wnd_);
     h_wnd_ = nullptr;
@@ -657,6 +674,7 @@ GHOST_Context *GHOST_WindowWin32::newDrawingContext(GHOST_TDrawingContextType ty
     }
 #endif
 
+#ifdef WITH_OPENGL_BACKEND
     case GHOST_kDrawingContextTypeD3D: {
       GHOST_Context *context = new GHOST_ContextD3D(want_context_params_, h_wnd_);
 
@@ -666,6 +684,18 @@ GHOST_Context *GHOST_WindowWin32::newDrawingContext(GHOST_TDrawingContextType ty
       delete context;
       return nullptr;
     }
+#endif
+
+#ifdef WITH_D3D9_BACKEND
+    case GHOST_kDrawingContextTypeD3D9: {
+      GHOST_Context *context = new GHOST_ContextD3D9(want_context_params_, h_wnd_);
+      if (context->initializeDrawingContext()) {
+        return context;
+      }
+      delete context;
+      return nullptr;
+    }
+#endif
 
     default:
       /* Unsupported backend. */

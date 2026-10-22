@@ -208,6 +208,7 @@ static const EnumPropertyItem rna_enum_preference_gpu_backend_items[] = {
     {GPU_BACKEND_OPENGL, "OPENGL", 0, "OpenGL", "Use OpenGL backend"},
     {GPU_BACKEND_METAL, "METAL", 0, "Metal", "Use Metal backend"},
     {GPU_BACKEND_VULKAN, "VULKAN", 0, "Vulkan", "Use Vulkan backend"},
+    {GPU_BACKEND_D3D9, "D3D9", 0, "Direct3D 9", "Use Direct3D 9 backend"},
     {0, nullptr, 0, nullptr, nullptr},
 };
 static const EnumPropertyItem rna_enum_preference_gpu_preferred_device_items[] = {
@@ -1534,6 +1535,11 @@ static const EnumPropertyItem *rna_preference_gpu_backend_itemf(bContext * /*C*/
 #  endif
 #  ifndef WITH_VULKAN_BACKEND
     if (item->value == GPU_BACKEND_VULKAN) {
+      continue;
+    }
+#  endif
+#  ifndef WITH_D3D9_BACKEND
+    if (item->value == GPU_BACKEND_D3D9) {
       continue;
     }
 #  endif

@@ -473,6 +473,66 @@ if(WITH_VULKAN_BACKEND)
   add_definitions(-DWITH_VULKAN_BACKEND)
 endif()
 
+set(D3D9_SRC
+  d3d9/d3d9_backend.cc
+  d3d9/d3d9_batch.cc
+  d3d9/d3d9_buffers.cc
+  d3d9/d3d9_context.cc
+  d3d9/d3d9_framebuffer.cc
+  d3d9/d3d9_immediate.cc
+  d3d9/d3d9_index_buffer.cc
+  d3d9/d3d9_shader.cc
+  d3d9/d3d9_state.cc
+  d3d9/d3d9_texture.cc
+  d3d9/d3d9_vertex_buffer.cc
+
+  d3d9/d3d9_backend.hh
+  d3d9/d3d9_batch.hh
+  d3d9/d3d9_buffers.hh
+  d3d9/d3d9_common.hh
+  d3d9/d3d9_context.hh
+  d3d9/d3d9_framebuffer.hh
+  d3d9/d3d9_immediate.hh
+  d3d9/d3d9_index_buffer.hh
+  d3d9/d3d9_shader.hh
+  d3d9/d3d9_state.hh
+  d3d9/d3d9_texture.hh
+  d3d9/d3d9_vertex_buffer.hh
+)
+
+if(WITH_D3D9_BACKEND)
+  list(APPEND INC
+    d3d9
+  )
+  list(APPEND SRC
+    ${D3D9_SRC}
+  )
+  list(APPEND LIB
+    PRIVATE d3d9
+  )
+  add_definitions(-DWITH_D3D9_BACKEND)
+
+  # HLSL shaders are compiled at build time by a Windows program (through
+  # CMAKE_CROSSCOMPILING_EMULATOR when cross compiling) using d3dcompiler_43.dll.
+  add_executable(d3d9_shader_compiler d3d9/compiler/d3d9_shader_compiler.cc)
+  set(D3D9_SHADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/d3d9/shaders)
+  set(D3D9_SHADER_MANIFEST ${D3D9_SHADER_DIR}/d3d9_shaders.txt)
+  set(D3D9_SHADER_BINARIES ${CMAKE_CURRENT_BINARY_DIR}/d3d9_shader_binaries.cc)
+  set(D3D9_SHADER_ASM_DIR ${CMAKE_CURRENT_BINARY_DIR}/d3d9_shaders_asm)
+  file(GLOB D3D9_HLSL ${D3D9_SHADER_DIR}/*.hlsl)
+  add_custom_command(
+    OUTPUT ${D3D9_SHADER_BINARIES}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${D3D9_SHADER_ASM_DIR}
+    COMMAND d3d9_shader_compiler
+      ${D3D9_SHADER_MANIFEST} ${D3D9_SHADER_DIR} ${D3D9_SHADER_BINARIES} ${D3D9_SHADER_ASM_DIR}
+    DEPENDS d3d9_shader_compiler ${D3D9_SHADER_MANIFEST} ${D3D9_HLSL}
+    COMMENT "Compiling Direct3D 9 shaders"
+  )
+  list(APPEND SRC
+    ${D3D9_SHADER_BINARIES}
+  )
+endif()
+
 set(GLSL_SRC
   GPU_shader_shared.hh
 

@@ -936,6 +936,14 @@ else()
   set(WITH_OPENGL_BACKEND OFF)
 endif()
 
+# Direct3D 9 (Shader Model 2.0 hardware, Windows XP).
+if(WIN32)
+  option(WITH_D3D9_BACKEND "Enable Direct3D 9 as graphics backend (Windows XP)" OFF)
+  mark_as_advanced(WITH_D3D9_BACKEND)
+else()
+  set(WITH_D3D9_BACKEND OFF)
+endif()
+
 # Vulkan
 if(NOT APPLE)
   option(WITH_VULKAN_BACKEND "Enable Vulkan as graphics backend" ON)

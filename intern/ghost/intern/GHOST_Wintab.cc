@@ -6,6 +6,8 @@
  * \ingroup GHOST
  */
 
+#include <cmath>
+
 #include "GHOST_Wintab.hh"
 
 GHOST_Wintab *GHOST_Wintab::loadWintabUnsafe(HWND hwnd)
@@ -158,6 +160,7 @@ GHOST_Wintab *GHOST_Wintab::loadWintab(HWND hwnd)
   LPTOP_LEVEL_EXCEPTION_FILTER current_filter = SetUnhandledExceptionFilter(nullptr);
   SetUnhandledExceptionFilter(current_filter);
 
+#ifdef _MSC_VER
   /* __except and __finally cannot be used together, as such a second nested __try block is needed.
    */
   __try
@@ -177,6 +180,12 @@ GHOST_Wintab *GHOST_Wintab::loadWintab(HWND hwnd)
      */
     SetUnhandledExceptionFilter(current_filter);
   }
+#else
+  /* No structured exception handling with GCC. */
+  GHOST_Wintab *wintab = GHOST_Wintab::loadWintabUnsafe(hwnd);
+  SetUnhandledExceptionFilter(current_filter);
+  return wintab;
+#endif
 
   return nullptr;
 }

@@ -107,5 +107,14 @@ class GHOST_IContext {
       std::function<void(GHOST_VulkanOpenXRData *)> openxr_release_framebuffer_image_callback) = 0;
 #endif
 
+  /**
+   * Get the Direct3D 9 handles of this context. The back buffer is resized to the window client
+   * area when needed, so the handles are only valid until the next call.
+   */
+  virtual GHOST_TSuccess getD3D9Handles(GHOST_D3D9Handles & /*r_handles*/)
+  {
+    return GHOST_kFailure;
+  }
+
   MEM_CXX_CLASS_ALLOC_FUNCS("GHOST:GHOST_IContext")
 };

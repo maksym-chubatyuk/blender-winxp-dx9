@@ -11,6 +11,8 @@
 #include "GHOST_Debug.hh"
 #include "GHOST_TrackpadWin32.hh"
 
+#ifndef __MINGW32__
+
 GHOST_DirectManipulationHelper::GHOST_DirectManipulationHelper(
     HWND hWnd,
     Microsoft::WRL::ComPtr<IDirectManipulationManager> directManipulationManager,
@@ -351,3 +353,5 @@ HRESULT GHOST_DirectManipulationViewportEventHandler::OnContentUpdated(
 
   return hr;
 }
+
+#endif /* __MINGW32__ */
