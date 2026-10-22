@@ -1545,18 +1545,10 @@ static const EnumPropertyItem *rna_3DViewShading_type_itemf(bContext * /*C*/,
   RNA_enum_items_add_value(&item, &totitem, rna_enum_shading_type_items, OB_WIRE);
   RNA_enum_items_add_value(&item, &totitem, rna_enum_shading_type_items, OB_SOLID);
 
-  if (scene == nullptr || BKE_scene_uses_blender_eevee(scene)) {
-    RNA_enum_items_add_value(&item, &totitem, rna_enum_shading_type_items, OB_MATERIAL);
+  /* XP port: no material preview (it uses EEVEE). */
+  if (scene == nullptr || BKE_scene_uses_blender_workbench(scene) || (type && type->view_draw))
+  {
     RNA_enum_items_add_value(&item, &totitem, rna_enum_shading_type_items, OB_RENDER);
-  }
-  else if (BKE_scene_uses_blender_workbench(scene)) {
-    RNA_enum_items_add_value(&item, &totitem, rna_enum_shading_type_items, OB_RENDER);
-  }
-  else {
-    RNA_enum_items_add_value(&item, &totitem, rna_enum_shading_type_items, OB_MATERIAL);
-    if (type && type->view_draw) {
-      RNA_enum_items_add_value(&item, &totitem, rna_enum_shading_type_items, OB_RENDER);
-    }
   }
 
   RNA_enum_item_end(&item, &totitem);

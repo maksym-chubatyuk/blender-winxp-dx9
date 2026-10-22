@@ -1185,7 +1185,10 @@ void DRWContext::enable_engines(bool gpencil_engine_needed, RenderEngineType *re
 
   /* Regular V3D drawing. */
   {
-    const eDrawType drawtype = eDrawType(this->v3d->shading.type);
+    /* XP port: no material preview (EEVEE), solid shading instead. */
+    const eDrawType drawtype = this->v3d->shading.type == OB_MATERIAL ?
+                                   OB_SOLID :
+                                   eDrawType(this->v3d->shading.type);
     const bool use_xray = XRAY_ENABLED(this->v3d);
 
     /* Base engine. */
@@ -2284,7 +2287,7 @@ bool DRWContext::is_viewport_compositor_enabled() const
 
 void DRW_engines_register()
 {
-  RE_engines_register(&DRW_engine_viewport_eevee_type);
+  /* XP port: no EEVEE, it needs newer GPUs than Direct3D 9 ones. */
   RE_engines_register(&DRW_engine_viewport_workbench_type);
 }
 
