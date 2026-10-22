@@ -16,6 +16,9 @@ STAGE=$OUT/stage
 cmake --install "$OUT/blender" >/dev/null
 mkdir -p "$STAGE"
 rsync -a --delete --exclude='__pycache__' "$OUT/install/" "$STAGE/blender/"
+# Hair isn't supported: no hair node group assets (Add Modifier > Hair) and presets.
+rm -rf "$STAGE"/blender/*/datafiles/assets/nodes/procedural_hair_node_assets.blend \
+  "$STAGE"/blender/*/scripts/presets/hair_dynamics
 find "$STAGE/blender" \( -name '*.exe' -o -name '*.dll' -o -name '*.pyd' \) -print0 |
   xargs -0 i686-w64-mingw32-strip --strip-unneeded
 

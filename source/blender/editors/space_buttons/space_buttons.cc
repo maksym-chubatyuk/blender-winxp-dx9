@@ -234,7 +234,7 @@ Vector<eSpaceButtons_Context> ED_buttons_tabs_list(const SpaceProperties *sbuts,
   add_tab(BCONTEXT_OBJECT);
   add_tab(BCONTEXT_MODIFIER);
   add_tab(BCONTEXT_SHADERFX);
-  add_tab(BCONTEXT_PARTICLE);
+  /* XP port: no particles (the viewport can't draw them). */
   add_tab(BCONTEXT_PHYSICS);
   add_tab(BCONTEXT_CONSTRAINT);
   add_tab(BCONTEXT_DATA);

@@ -2461,14 +2461,7 @@ class VIEW3D_MT_curve_add(Menu):
         layout.operator("curve.primitive_nurbs_circle_add", text="Nurbs Circle", icon='CURVE_NCIRCLE')
         layout.operator("curve.primitive_nurbs_path_add", text="Path", icon='CURVE_PATH')
 
-        layout.separator()
-
-        layout.operator("object.curves_empty_hair_add", text="Empty Hair", icon='CURVES_DATA')
-        layout.operator("object.quick_fur", text="Fur", icon='CURVES_DATA')
-
-        experimental = context.preferences.experimental
-        if experimental.use_new_curves_tools:
-            layout.operator("object.curves_random_add", text="Random", icon='CURVES_DATA')
+        # XP port: no hair curves (the viewport can't draw them).
 
 
 class VIEW3D_MT_surface_add(Menu):
@@ -2704,9 +2697,7 @@ class VIEW3D_MT_add(Menu):
         layout.menu("VIEW3D_MT_surface_add", icon='OUTLINER_OB_SURFACE')
         layout.menu("VIEW3D_MT_metaball_add", text="Metaball", icon='OUTLINER_OB_META')
         layout.operator("object.text_add", text="Text", icon='OUTLINER_OB_FONT')
-        layout.operator("object.pointcloud_random_add", text="Point Cloud", icon='OUTLINER_OB_POINTCLOUD')
-        layout.menu("VIEW3D_MT_volume_add", text="Volume", text_ctxt=i18n_contexts.id_id, icon='OUTLINER_OB_VOLUME')
-        layout.menu("VIEW3D_MT_grease_pencil_add", text="Grease Pencil", icon='OUTLINER_OB_GREASEPENCIL')
+        # XP port: no point clouds, volumes and grease pencil (the viewport can't draw them).
 
         layout.separator()
 
@@ -2859,7 +2850,7 @@ class VIEW3D_MT_object(Menu):
 
         layout.separator()
 
-        layout.menu("VIEW3D_MT_object_quick_effects")
+        # XP port: no quick effects (fur, particles, smoke).
 
         layout.separator()
 

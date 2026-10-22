@@ -266,11 +266,9 @@ class OBJECT_MT_modifier_add_physics(ModifierAddMenu, Menu):
             self.operator_modifier_add(layout, 'CLOTH')
             self.operator_modifier_add(layout, 'COLLISION')
             self.operator_modifier_add(layout, 'DYNAMIC_PAINT')
-            self.operator_modifier_add(layout, 'EXPLODE')
             self.operator_modifier_add(layout, 'FLUID')
             self.operator_modifier_add(layout, 'OCEAN')
-            self.operator_modifier_add(layout, 'PARTICLE_INSTANCE')
-            self.operator_modifier_add(layout, 'PARTICLE_SYSTEM')
+            # XP port: no particle modifiers (the viewport can't draw particles).
         if ob_type in {'MESH', 'CURVE', 'FONT', 'SURFACE', 'LATTICE'}:
             self.operator_modifier_add(layout, 'SOFT_BODY')
         layout.template_modifier_asset_menu_items(catalog_path=self.bl_label)
