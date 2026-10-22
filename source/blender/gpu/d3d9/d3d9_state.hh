@@ -40,6 +40,12 @@ class D3D9StateManager : public StateManager {
   void image_unbind(Texture * /*tex*/) override {}
   void image_unbind_all() override {}
 
+  /** The depth test was changed on the device: send it again with the next state. */
+  void depth_test_invalidate()
+  {
+    current_.depth_test ^= 1;
+  }
+
   /** Re-apply the culling as the winding depends on the frame-buffer orientation. */
   void framebuffer_orientation_changed();
 

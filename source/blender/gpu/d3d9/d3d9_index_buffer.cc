@@ -15,6 +15,13 @@
 
 namespace blender::gpu {
 
+/** Versions are unique over all the buffers: a new buffer can have the address of a freed one. */
+static uint32_t next_version()
+{
+  static uint32_t version = 0;
+  return ++version;
+}
+
 D3D9IndexBuf::~D3D9IndexBuf()
 {
   d3d9_release(ibo_);
@@ -53,6 +60,7 @@ IDirect3DIndexBuffer9 *D3D9IndexBuf::buffer_get()
   }
   /* No need to keep a copy of data in system memory. */
   MEM_SAFE_DELETE_VOID(data_);
+  version_ = next_version();
   return ibo_;
 }
 
@@ -83,6 +91,35 @@ void D3D9IndexBuf::update_sub(uint start, uint len, const void *data)
     memcpy(dst, data, len);
     ibo_->Unlock();
   }
+  version_ = next_version();
+}
+
+Span<uint32_t> D3D9IndexBuf::host_indices_get()
+{
+  if (is_subrange_) {
+    return source_get()->host_indices_get();
+  }
+  if (buffer_get() == nullptr) {
+    return {};
+  }
+  if (host_indices_version_ == version_) {
+    return host_indices_;
+  }
+  host_indices_version_ = version_;
+  host_indices_.resize(index_len_);
+  void *src;
+  /* Managed buffers are read from their system memory copy. */
+  if (FAILED(ibo_->Lock(0, 0, &src, D3DLOCK_READONLY))) {
+    host_indices_.clear();
+    return {};
+  }
+  for (uint i = 0; i < index_len_; i++) {
+    const uint32_t index = is_32bit() ? static_cast<const uint32_t *>(src)[i] :
+                                        static_cast<const uint16_t *>(src)[i];
+    host_indices_[i] = index + index_base_;
+  }
+  ibo_->Unlock();
+  return host_indices_;
 }
 
 void D3D9IndexBuf::strip_restart_indices()

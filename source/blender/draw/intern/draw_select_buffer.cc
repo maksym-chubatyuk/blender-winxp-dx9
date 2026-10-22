@@ -9,13 +9,16 @@
  */
 
 #include <cfloat>
+#include <cmath>
 
 #include "BLI_math_matrix.hh"
 #include "MEM_guardedalloc.h"
 
+#include "BLI_array.hh"
 #include "BLI_array_utils.h"
 #include "BLI_bitmap.h"
 #include "BLI_bitmap_draw_2d.h"
+#include "BLI_math_base.h"
 #include "BLI_math_matrix.h"
 #include "BLI_rect.h"
 
@@ -92,8 +95,9 @@ uint *DRW_select_buffer_read(
     }
 
     if (select_ctx->max_index_drawn_len > 1) {
-      BLI_assert(region->winx == GPU_texture_width(DRW_engine_select_texture_get()) &&
-                 region->winy == GPU_texture_height(DRW_engine_select_texture_get()));
+      /* The viewport can render at a reduced resolution (see #GPU_viewport_render_scale_set). */
+      const int tex_w = GPU_texture_width(DRW_engine_select_texture_get());
+      const int tex_h = GPU_texture_height(DRW_engine_select_texture_get());
 
       /* Read the UI32 pixels. */
       buf_len = BLI_rcti_size_x(rect) * BLI_rcti_size_y(rect);
@@ -101,15 +105,52 @@ uint *DRW_select_buffer_read(
 
       gpu::FrameBuffer *select_id_fb = DRW_engine_select_framebuffer_get();
       GPU_framebuffer_bind(select_id_fb);
-      GPU_framebuffer_read_color(select_id_fb,
-                                 rect_clamp.xmin,
-                                 rect_clamp.ymin,
-                                 BLI_rcti_size_x(&rect_clamp),
-                                 BLI_rcti_size_y(&rect_clamp),
-                                 1,
+      if (tex_w == region->winx && tex_h == region->winy) {
+        GPU_framebuffer_read_color(select_id_fb,
+                                   rect_clamp.xmin,
+                                   rect_clamp.ymin,
+                                   BLI_rcti_size_x(&rect_clamp),
+                                   BLI_rcti_size_y(&rect_clamp),
+                                   1,
+                                   0,
+                                   GPU_DATA_UINT,
+                                   buf);
+      }
+      else {
+        /* Read the matching texels and expand them to region pixels (nearest). */
+        const float scale_x = float(tex_w) / float(region->winx);
+        const float scale_y = float(tex_h) / float(region->winy);
+        rcti tex_rect;
+        tex_rect.xmin = clamp_i(int(float(rect_clamp.xmin) * scale_x), 0, tex_w - 1);
+        tex_rect.ymin = clamp_i(int(float(rect_clamp.ymin) * scale_y), 0, tex_h - 1);
+        tex_rect.xmax = clamp_i(int(ceilf(float(rect_clamp.xmax) * scale_x)), tex_rect.xmin + 1, tex_w);
+        tex_rect.ymax = clamp_i(int(ceilf(float(rect_clamp.ymax) * scale_y)), tex_rect.ymin + 1, tex_h);
+        const int tex_rect_w = BLI_rcti_size_x(&tex_rect);
+        const int tex_rect_h = BLI_rcti_size_y(&tex_rect);
+        Array<uint> tex_buf(tex_rect_w * tex_rect_h);
+        GPU_framebuffer_read_color(select_id_fb,
+                                   tex_rect.xmin,
+                                   tex_rect.ymin,
+                                   tex_rect_w,
+                                   tex_rect_h,
+                                   1,
+                                   0,
+                                   GPU_DATA_UINT,
+                                   tex_buf.data());
+        const int clamp_w = BLI_rcti_size_x(&rect_clamp);
+        const int clamp_h = BLI_rcti_size_y(&rect_clamp);
+        for (int y = 0; y < clamp_h; y++) {
+          const int ty = clamp_i(int(float(rect_clamp.ymin + y) * scale_y) - tex_rect.ymin,
                                  0,
-                                 GPU_DATA_UINT,
-                                 buf);
+                                 tex_rect_h - 1);
+          for (int x = 0; x < clamp_w; x++) {
+            const int tx = clamp_i(int(float(rect_clamp.xmin + x) * scale_x) - tex_rect.xmin,
+                                   0,
+                                   tex_rect_w - 1);
+            buf[y * clamp_w + x] = tex_buf[ty * tex_rect_w + tx];
+          }
+        }
+      }
 
       if (!BLI_rcti_compare(rect, &rect_clamp)) {
         /* The rect has been clamped so we need to realign the buffer and fill in the blanks */

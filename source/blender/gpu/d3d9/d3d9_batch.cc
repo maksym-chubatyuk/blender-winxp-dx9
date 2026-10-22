@@ -63,7 +63,7 @@ bool d3d9_primitive(GPUPrimType prim_type,
   return r_prim_len > 0;
 }
 
-bool D3D9Batch::bind_vertex_streams(D3D9Shader *shader)
+bool D3D9Batch::bind_vertex_streams(D3D9Shader *shader, const DeindexRange *deindex)
 {
   D3D9Context *ctx = D3D9Context::get();
   D3D9Backend *backend = D3D9Backend::get();
@@ -79,7 +79,9 @@ bool D3D9Batch::bind_vertex_streams(D3D9Shader *shader)
     if (vbo == nullptr) {
       continue;
     }
-    IDirect3DVertexBuffer9 *buffer = vbo->buffer_get();
+    IDirect3DVertexBuffer9 *buffer = deindex ? vbo->deindexed_get(
+                                                   *deindex->ib, deindex->start, deindex->count) :
+                                               vbo->buffer_get();
     if (buffer == nullptr) {
       continue;
     }
@@ -191,17 +193,30 @@ void D3D9Batch::draw(int v_first, int v_count, int i_first, int i_count)
     return;
   }
   static const bool trace = getenv("BLENDER_D3D9_TRACE") != nullptr;
-  if (!bind_vertex_streams(shader)) {
-    if (trace) {
-      printf("  DROP: vertex streams\n");
-    }
-    return;
-  }
   D3DPRIMITIVETYPE type;
   uint prim_len;
   if (!d3d9_primitive(prim_type, v_count, type, prim_len)) {
     if (trace) {
       printf("  DROP: primitive %d\n", int(prim_type));
+    }
+    return;
+  }
+  D3D9IndexBuf *ib = static_cast<D3D9IndexBuf *>(elem);
+  /* Indexed point lists show only some of the points on Radeon 9x00 drivers: draw copies of the
+   * vertices in index order instead (cached by the vertex buffers). */
+  DeindexRange deindex_range;
+  const DeindexRange *deindex = nullptr;
+  if (ib && type == D3DPT_POINTLIST && shader->vertex_pulls().is_empty() &&
+      !shader->uses_vertex_id())
+  {
+    deindex_range = {ib, ib->draw_start_get() + uint(v_first), uint(v_count)};
+    deindex = &deindex_range;
+    ib = nullptr;
+    v_first = 0;
+  }
+  if (!bind_vertex_streams(shader, deindex)) {
+    if (trace) {
+      printf("  DROP: vertex streams\n");
     }
     return;
   }
@@ -218,7 +233,6 @@ void D3D9Batch::draw(int v_first, int v_count, int i_first, int i_count)
   }
 
   IDirect3DDevice9 *device = ctx->device;
-  D3D9IndexBuf *ib = static_cast<D3D9IndexBuf *>(elem);
   IDirect3DIndexBuffer9 *ibo = ib ? ib->buffer_get() : nullptr;
   if (ib && ibo == nullptr) {
     return;

@@ -332,6 +332,13 @@ bool D3D9Context::draw_setup_impl()
   t = d3d9_time_ms();
   state.apply_state();
   d3d9_frame_stats.state_ms += d3d9_time_ms() - t;
+  /* `BLENDER_D3D9_ZALWAYS=<shader name>`: no depth test for the draws of the shader (debugging). */
+  static const char *zalways = getenv("BLENDER_D3D9_ZALWAYS");
+  if (zalways && sh->name_get() == zalways) {
+    device->SetRenderState(D3DRS_ZFUNC, D3DCMP_ALWAYS);
+    /* Send the depth test of the next draw again. */
+    state.depth_test_invalidate();
+  }
 
   /* Reserved vertex shader constants, see `d3d9_common.hlsl`. */
   int viewport[4];

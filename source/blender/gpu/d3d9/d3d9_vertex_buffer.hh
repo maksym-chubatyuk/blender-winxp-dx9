@@ -14,6 +14,8 @@
 
 namespace blender::gpu {
 
+class D3D9IndexBuf;
+
 /**
  * Device side layout of a vertex format.
  *
@@ -57,6 +59,11 @@ class D3D9VertBuf : public VertBuf {
     }
     return layout_;
   }
+  /**
+   * Buffer with the vertices of the indices `start` to `start + count` of `ib`, in order (null on
+   * failure). Kept until the vertices, the indices or the range change.
+   */
+  IDirect3DVertexBuffer9 *deindexed_get(D3D9IndexBuf &ib, uint start, uint count);
   /** Host data, null once a static buffer is uploaded. */
   const uchar *host_data_get() const
   {
@@ -74,6 +81,16 @@ class D3D9VertBuf : public VertBuf {
   uint vbo_size_ = 0;
   D3D9VertexLayout layout_;
   bool layout_dirty_ = true;
+  /** Incremented when the device data changes. */
+  uint32_t version_ = 1;
+
+  IDirect3DVertexBuffer9 *deindexed_ = nullptr;
+  uint deindexed_size_ = 0;
+  const D3D9IndexBuf *deindexed_ib_ = nullptr;
+  uint32_t deindexed_ib_version_ = 0;
+  uint32_t deindexed_version_ = 0;
+  uint deindexed_start_ = 0;
+  uint deindexed_count_ = 0;
 };
 
 }  // namespace blender::gpu

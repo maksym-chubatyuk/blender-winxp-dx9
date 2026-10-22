@@ -14,6 +14,7 @@
 
 namespace blender::gpu {
 
+class D3D9IndexBuf;
 class D3D9Shader;
 
 /** D3D9 primitive type and primitive count for a vertex count, returns false when unsupported. */
@@ -32,8 +33,15 @@ class D3D9Batch : public Batch {
                            intptr_t stride) override;
 
  private:
+  /** Indices drawn from de-indexed copies of the vertex buffers. */
+  struct DeindexRange {
+    D3D9IndexBuf *ib;
+    uint start;
+    uint count;
+  };
+
   /** Bind the vertex streams and declaration for the bound shader. */
-  bool bind_vertex_streams(D3D9Shader *shader);
+  bool bind_vertex_streams(D3D9Shader *shader, const DeindexRange *deindex = nullptr);
 };
 
 }  // namespace blender::gpu

@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include "BLI_vector.hh"
+
 #include "GPU_index_buffer.hh"
 
 #include "d3d9_common.hh"
@@ -30,11 +32,26 @@ class D3D9IndexBuf : public IndexBuf {
   {
     return index_start_;
   }
+  /** Buffer holding the indices (the source of a sub-range). */
+  D3D9IndexBuf *source_get()
+  {
+    return is_subrange_ ? static_cast<D3D9IndexBuf *>(src_) : this;
+  }
+  /** Incremented when the indices change. */
+  uint32_t version_get() const
+  {
+    return version_;
+  }
+  /** Vertex indices (base included) of the whole source buffer, read back and kept on the host. */
+  Span<uint32_t> host_indices_get();
 
  private:
   void strip_restart_indices() override;
 
   IDirect3DIndexBuffer9 *ibo_ = nullptr;
+  uint32_t version_ = 0;
+  Vector<uint32_t> host_indices_;
+  uint32_t host_indices_version_ = 0;
 };
 
 }  // namespace blender::gpu

@@ -14,6 +14,7 @@
 
 #include "d3d9_backend.hh"
 #include "d3d9_context.hh"
+#include "d3d9_index_buffer.hh"
 #include "d3d9_vertex_buffer.hh"
 
 namespace blender::gpu {
@@ -237,6 +238,12 @@ void D3D9VertBuf::release_data()
     d3d9_release(vbo_);
     vbo_size_ = 0;
   }
+  if (deindexed_) {
+    memory_usage -= deindexed_size_;
+    d3d9_release(deindexed_);
+    deindexed_size_ = 0;
+  }
+  deindexed_ib_ = nullptr;
   MEM_SAFE_DELETE(data_);
 }
 
@@ -289,7 +296,70 @@ IDirect3DVertexBuffer9 *D3D9VertBuf::buffer_get()
   }
   flag &= ~GPU_VERTBUF_DATA_DIRTY;
   flag |= GPU_VERTBUF_DATA_UPLOADED;
+  version_++;
   return vbo_;
+}
+
+IDirect3DVertexBuffer9 *D3D9VertBuf::deindexed_get(D3D9IndexBuf &ib, uint start, uint count)
+{
+  if (buffer_get() == nullptr || count == 0) {
+    return nullptr;
+  }
+  D3D9IndexBuf *source_ib = ib.source_get();
+  if (deindexed_ && deindexed_ib_ == source_ib && deindexed_ib_version_ == source_ib->version_get() &&
+      deindexed_version_ == version_ && deindexed_start_ == start && deindexed_count_ == count)
+  {
+    return deindexed_;
+  }
+  const Span<uint32_t> indices = source_ib->host_indices_get();
+  if (start + count > indices.size()) {
+    return nullptr;
+  }
+  const uint stride = layout_get().stride;
+  const uint size = max_uu(stride * count, 4);
+  IDirect3DDevice9 *device = D3D9Backend::get()->device;
+  if (deindexed_ == nullptr || deindexed_size_ < size) {
+    if (deindexed_) {
+      memory_usage -= deindexed_size_;
+    }
+    d3d9_release(deindexed_);
+    deindexed_size_ = 0;
+    if (!D3D9_CHECK(device->CreateVertexBuffer(
+            size, D3DUSAGE_WRITEONLY, 0, D3DPOOL_MANAGED, &deindexed_, nullptr)))
+    {
+      return nullptr;
+    }
+    deindexed_size_ = size;
+    memory_usage += deindexed_size_;
+  }
+  void *src, *dst;
+  /* Managed buffers are read from their system memory copy. */
+  if (FAILED(vbo_->Lock(0, 0, &src, D3DLOCK_READONLY))) {
+    return nullptr;
+  }
+  if (FAILED(deindexed_->Lock(0, size, &dst, 0))) {
+    vbo_->Unlock();
+    return nullptr;
+  }
+  for (uint i = 0; i < count; i++) {
+    const uint32_t index = indices[start + i];
+    uint8_t *vert = static_cast<uint8_t *>(dst) + i * stride;
+    if (index < vertex_len) {
+      memcpy(vert, static_cast<const uint8_t *>(src) + index * stride, stride);
+    }
+    else {
+      memset(vert, 0, stride);
+    }
+  }
+  deindexed_->Unlock();
+  vbo_->Unlock();
+  d3d9_frame_stats.upload_bytes += size;
+  deindexed_ib_ = source_ib;
+  deindexed_ib_version_ = source_ib->version_get();
+  deindexed_version_ = version_;
+  deindexed_start_ = start;
+  deindexed_count_ = count;
+  return deindexed_;
 }
 
 void D3D9VertBuf::update_sub(uint start, uint len, const void *data)
@@ -304,6 +374,7 @@ void D3D9VertBuf::update_sub(uint start, uint len, const void *data)
       memcpy(dst, data, len);
       vbo_->Unlock();
     }
+    version_++;
     return;
   }
   /* Converted layouts: patch the host data and upload everything again. */
