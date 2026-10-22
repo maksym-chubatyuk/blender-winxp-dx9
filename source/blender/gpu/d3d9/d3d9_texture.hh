@@ -86,6 +86,14 @@ class D3D9Texture : public Texture {
   {
     return device_h_;
   }
+  const char *debug_name() const
+  {
+    return name_.c_str();
+  }
+  bool is_render_target() const
+  {
+    return source_ ? source_->is_render_target_ : is_render_target_;
+  }
   /** Float formats can't be filtered by most SM2.0 hardware. */
   bool is_filterable() const
   {

@@ -6,10 +6,12 @@
  * \ingroup gpu
  */
 
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 
 #include "BLI_function_ref.hh"
+#include "BLI_map.hh"
 #include "BLI_math_base.h"
 #include "BLI_set.hh"
 #include "BLI_string.h"
@@ -362,28 +364,67 @@ void D3D9Shader::init(const ShaderCreateInfo &info, bool /*is_codegen_only*/)
   }
 
   parse_vertex_inputs(binary->vs, binary->vs_size);
+  parse_instance_data(*binary);
   parse_constant_table(binary->vs, binary->vs_size, true);
   parse_constant_table(binary->ps, binary->ps_size, false);
 
-  /* Uniform buffers are written to the constants named after the block. */
+  /* Uniform buffers are written to the constants named after the block, or to constants named
+   * `<block>__<register>` receiving the buffer from this register on (pixel shaders only have 32
+   * constants). */
   for (const ShaderCreateInfo::Resource &res : info.resources_get_all_()) {
     if (res.bind_type != ShaderCreateInfo::Resource::BindType::UNIFORM_BUFFER) {
       continue;
     }
-    UniformBlock block;
-    block.slot = res.slot;
-    auto find = [&](const uint32_t *code, uint32_t size, int16_t &r_reg, int16_t &r_len) {
+    /* Strip the array size of the block name. */
+    StringRef block_name = res.uniformbuf.name;
+    const int64_t bracket = block_name.find('[');
+    if (bracket != StringRef::not_found) {
+      block_name = block_name.substr(0, bracket);
+    }
+    std::string types;
+    if (binary->ubo_types) {
+      const std::string prefix = std::string(block_name) + ":";
+      StringRef all_types = binary->ubo_types;
+      const int64_t pos = all_types.find(prefix);
+      if (pos != StringRef::not_found) {
+        StringRef rest = all_types.substr(pos + prefix.size());
+        const int64_t type_end = rest.find(' ');
+        types = type_end == StringRef::not_found ? rest : rest.substr(0, type_end);
+      }
+    }
+    /* Constant name to block register offset, gathered from both stages. */
+    Map<std::string, UniformBlock> blocks;
+    auto find = [&](const uint32_t *code, uint32_t size, bool is_vertex) {
       constant_table_foreach(
           code, size, [&](StringRefNull name, uint32_t register_set, int index, int count) {
-            if (register_set == D3D9_REGSET_FLOAT4 && name == res.uniformbuf.name) {
-              r_reg = int16_t(index);
-              r_len = int16_t(count);
+            if (register_set != D3D9_REGSET_FLOAT4 || !name.startswith(block_name)) {
+              return;
+            }
+            const StringRef suffix = name.substr(block_name.size());
+            int src_offset = 0;
+            if (!suffix.is_empty()) {
+              if (!suffix.startswith("__")) {
+                return;
+              }
+              src_offset = atoi(std::string(suffix.substr(2)).c_str());
+            }
+            UniformBlock &block = blocks.lookup_or_add_default(name);
+            block.slot = res.slot;
+            block.src_offset = src_offset;
+            block.types = types;
+            if (is_vertex) {
+              block.vs_reg = int16_t(index);
+              block.vs_len = int16_t(count);
+            }
+            else {
+              block.ps_reg = int16_t(index);
+              block.ps_len = int16_t(count);
             }
           });
     };
-    find(binary->vs, binary->vs_size, block.vs_reg, block.vs_len);
-    find(binary->ps, binary->ps_size, block.ps_reg, block.ps_len);
-    if (block.vs_reg >= 0 || block.ps_reg >= 0) {
+    find(binary->vs, binary->vs_size, true);
+    find(binary->ps, binary->ps_size, false);
+    for (const UniformBlock &block : blocks.values()) {
       ubo_blocks_.append(block);
       if (block.vs_reg >= 0) {
         vs_constants_.resize(max_ii(vs_constants_.size(), block.vs_reg + block.vs_len),
@@ -394,6 +435,176 @@ void D3D9Shader::init(const ShaderCreateInfo &info, bool /*is_codegen_only*/)
                              float4(0.0f));
       }
     }
+  }
+}
+
+void D3D9Shader::parse_instance_data(const D3D9ShaderBinary &binary)
+{
+  if (binary.instance_data == nullptr || binary.instance_data[0] == '\0') {
+    return;
+  }
+  StringRef list = binary.instance_data;
+  while (!list.is_empty()) {
+    const int64_t end = list.find(';');
+    const std::string annotation = end == StringRef::not_found ? list : list.substr(0, end);
+    list = end == StringRef::not_found ? StringRef() : list.substr(end + 1);
+
+    char key[32], name[64], index[16], types[256];
+    int slot, stride, offset;
+    if (sscanf(annotation.c_str(), "%31s", key) != 1) {
+      continue;
+    }
+    if (STREQ(key, "resource-id")) {
+      sscanf(annotation.c_str(), "%*s %d %d", &resource_id_slot_, &resource_id_stride_);
+      continue;
+    }
+    if (!STREQ(key, "instance") ||
+        sscanf(annotation.c_str(),
+               "%*s %63s %d %d %d %15s %255s",
+               name,
+               &slot,
+               &stride,
+               &offset,
+               index,
+               types) != 6)
+    {
+      CLOG_ERROR(&LOG, "Shader \"%s\": invalid annotation \"%s\"", this->name, annotation.c_str());
+      continue;
+    }
+    InstanceData data;
+    data.slot = slot;
+    data.stride = stride;
+    data.offset = offset;
+    data.index_source = STREQ(index, "custom") ? 1 : (STREQ(index, "instance") ? 2 : 0);
+    data.types = types;
+    auto find = [&](const uint32_t *code, uint32_t size, int16_t &r_reg, int16_t &r_len) {
+      constant_table_foreach(
+          code, size, [&](StringRefNull const_name, uint32_t register_set, int reg, int count) {
+            if (register_set == D3D9_REGSET_FLOAT4 && const_name == name) {
+              r_reg = int16_t(reg);
+              r_len = int16_t(count);
+            }
+          });
+    };
+    find(binary.vs, binary.vs_size, data.vs_reg, data.vs_len);
+    find(binary.ps, binary.ps_size, data.ps_reg, data.ps_len);
+    if (data.vs_reg < 0 && data.ps_reg < 0) {
+      /* Optimized out. */
+      continue;
+    }
+    if (data.vs_reg >= 0) {
+      vs_constants_.resize(max_ii(vs_constants_.size(), data.vs_reg + data.vs_len), float4(0.0f));
+    }
+    if (data.ps_reg >= 0) {
+      ps_constants_.resize(max_ii(ps_constants_.size(), data.ps_reg + data.ps_len), float4(0.0f));
+    }
+    instance_data_.append(std::move(data));
+  }
+}
+
+void D3D9Shader::instance_data_set(int instance)
+{
+  D3D9Context *ctx = D3D9Context::get();
+  /* Resource and custom ids of the instance, from the draw manager resource id buffer. */
+  uint32_t resource_id = 0, custom_id = 0;
+  if (resource_id_slot_ >= 0) {
+    const D3D9StorageBuf *ids = ctx->bound_ssbos[resource_id_slot_];
+    if (ids) {
+      const size_t index = size_t(instance) * resource_id_stride_;
+      const uint32_t *words = reinterpret_cast<const uint32_t *>(ids->data_get());
+      const size_t words_len = ids->size_get() / 4;
+      if (index < words_len) {
+        resource_id = words[index];
+      }
+      if (resource_id_stride_ > 1 && index + 1 < words_len) {
+        custom_id = words[index + 1];
+      }
+    }
+  }
+
+  static const bool trace = getenv("BLENDER_D3D9_TRACE") != nullptr;
+  if (trace) {
+    printf("  instance %d resource_id=%u custom_id=%u (ids slot %d %s)\n",
+           instance,
+           resource_id,
+           custom_id,
+           resource_id_slot_,
+           (resource_id_slot_ >= 0 && ctx->bound_ssbos[resource_id_slot_]) ? "bound" : "unbound");
+  }
+  for (const InstanceData &data : instance_data_) {
+    const D3D9StorageBuf *buf = (data.slot >= 0 && data.slot < D3D9_MAX_SSBO_SLOTS) ?
+                                    ctx->bound_ssbos[data.slot] :
+                                    nullptr;
+    if (trace) {
+      printf("    data slot %d vs_reg %d ps_reg %d src %d: %s size %d\n",
+             data.slot,
+             data.vs_reg,
+             data.ps_reg,
+             data.index_source,
+             buf ? "bound" : "unbound",
+             buf ? int(buf->size_get()) : 0);
+    }
+    if (buf == nullptr) {
+      continue;
+    }
+    const size_t element = data.index_source == 1 ? custom_id :
+                           data.index_source == 2 ? size_t(instance) :
+                                                    resource_id;
+    const size_t start = element * data.stride + data.offset;
+    const size_t words_len = data.types.size();
+    if (start + words_len * 4 > buf->size_get()) {
+      continue;
+    }
+    const uint32_t *src = reinterpret_cast<const uint32_t *>(buf->data_get() + start);
+    /* Convert to floats, see `d3d9_common.hlsl` for the types. */
+    float values[128];
+    int len = 0;
+    for (size_t w = 0; w < words_len && len < 124; w++) {
+      switch (data.types[w]) {
+        case 'i':
+          values[len++] = float(int32_t(src[w]));
+          break;
+        case 'u':
+          values[len++] = float(src[w]);
+          break;
+        case 'b':
+          values[len++] = src[w] ? 1.0f : 0.0f;
+          break;
+        case 'B':
+          for (int byte = 0; byte < 4; byte++) {
+            values[len++] = float((src[w] >> (byte * 8)) & 0xFFu) / 255.0f;
+          }
+          break;
+        default:
+          memcpy(&values[len++], &src[w], sizeof(float));
+          break;
+      }
+    }
+    const int regs = (len + 3) / 4;
+    while (len < regs * 4) {
+      values[len++] = 0.0f;
+    }
+    if (trace) {
+      printf("    slot %d element %u raw %08x values (%g %g %g %g)\n",
+             data.slot,
+             uint(element),
+             src[0],
+             values[0],
+             values[1],
+             values[2],
+             values[3]);
+    }
+    auto write = [&](int reg, int reg_len, Vector<float4> &constants, int &dirty_min, int &dirty_max) {
+      if (reg < 0) {
+        return;
+      }
+      const int count = min_ii(reg_len, regs);
+      memcpy(&constants[reg], values, count * sizeof(float4));
+      dirty_min = min_ii(dirty_min, reg);
+      dirty_max = max_ii(dirty_max, reg + count - 1);
+    };
+    write(data.vs_reg, data.vs_len, vs_constants_, vs_dirty_min_, vs_dirty_max_);
+    write(data.ps_reg, data.ps_len, ps_constants_, ps_dirty_min_, ps_dirty_max_);
   }
 }
 
@@ -527,13 +738,55 @@ void D3D9Shader::constants_upload(IDirect3DDevice9 *device)
   /* Copy the bound uniform buffers into their constants. */
   if (!ubo_blocks_.is_empty()) {
     D3D9Context *ctx = D3D9Context::get();
+    static const bool trace = getenv("BLENDER_D3D9_TRACE") != nullptr;
     for (const UniformBlock &block : ubo_blocks_) {
       const D3D9UniformBuf *ubo = ctx->bound_ubos[block.slot];
+      if (trace) {
+        const float *f = ubo ? static_cast<const float *>(ubo->data_get()) + block.src_offset * 4 :
+                               nullptr;
+        printf("  ubo slot %d offset %d %s first=(%.3f %.3f %.3f %.3f)\n",
+               block.slot,
+               block.src_offset,
+               ubo ? "bound" : "UNBOUND",
+               f ? f[0] : 0.0f,
+               f ? f[1] : 0.0f,
+               f ? f[2] : 0.0f,
+               f ? f[3] : 0.0f);
+      }
       if (ubo == nullptr) {
         continue;
       }
-      const float4 *src = static_cast<const float4 *>(ubo->data_get());
-      const int ubo_regs = int(ubo->size_get() / sizeof(float4));
+      const int ubo_regs = int(ubo->size_get() / sizeof(float4)) - block.src_offset;
+      if (ubo_regs <= 0) {
+        continue;
+      }
+      const float4 *src = static_cast<const float4 *>(ubo->data_get()) + block.src_offset;
+      Vector<float4> converted;
+      if (!block.types.empty()) {
+        /* Integers become floats: SM2.0 constants are floats only. */
+        converted.resize(ubo_regs);
+        const uint32_t *raw = reinterpret_cast<const uint32_t *>(src);
+        float *dst = &converted[0].x;
+        for (int c = 0; c < ubo_regs * 4; c++) {
+          const int type_index = block.src_offset * 4 + c;
+          const char type = type_index < int(block.types.size()) ? block.types[type_index] : 'f';
+          switch (type) {
+            case 'i':
+              dst[c] = float(int32_t(raw[c]));
+              break;
+            case 'u':
+              dst[c] = float(raw[c]);
+              break;
+            case 'b':
+              dst[c] = raw[c] ? 1.0f : 0.0f;
+              break;
+            default:
+              memcpy(&dst[c], &raw[c], sizeof(float));
+              break;
+          }
+        }
+        src = converted.data();
+      }
       auto copy = [&](int reg, int len, Vector<float4> &constants, int &dirty_min, int &dirty_max) {
         if (reg < 0) {
           return;

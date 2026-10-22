@@ -18,6 +18,7 @@
 #include "d3d9_immediate.hh"
 #include "d3d9_shader.hh"
 #include "d3d9_state.hh"
+#include "d3d9_texture.hh"
 
 namespace blender::gpu {
 
@@ -219,15 +220,41 @@ bool D3D9Context::draw_setup()
   static const bool trace = getenv("BLENDER_D3D9_TRACE") != nullptr;
   if (trace) {
     const float4 *ps = sh->ps_constants_get();
-    printf("draw %s fb=%s vp=(%d %d %d %d) blend=%d ps0=(%.3f %.3f %.3f %.3f)\n",
+    printf("draw %s fb=%s vp=(%d %d %d %d) blend=%d depth=%d write=%d ps0=(%.3f %.3f %.3f %.3f)\n",
            sh->name_get().c_str(),
            fb->name_get(),
            UNPACK4(viewport),
            int(state.state.blend),
+           int(state.state.depth_test),
+           int(state.state.write_mask),
            ps ? ps->x : -1.0f,
            ps ? ps->y : -1.0f,
            ps ? ps->z : -1.0f,
            ps ? ps->w : -1.0f);
+  }
+
+  if (trace) {
+    for (int unit = 0; unit < 4; unit++) {
+      D3D9Texture *tex = state.texture_get(unit);
+      if (tex) {
+        printf("  tex%d %s %p rt=%d %dx%d\n",
+               unit,
+               tex->debug_name(),
+               static_cast<void *>(tex->base_texture_get()),
+               int(tex->is_render_target()),
+               tex->device_width(),
+               tex->device_height());
+      }
+    }
+    for (int slot = 0; slot < 2; slot++) {
+      gpu::Texture *tex = fb->color_tex(slot);
+      if (tex) {
+        printf("  rt%d %s %p\n",
+               slot,
+               static_cast<D3D9Texture *>(tex)->debug_name(),
+               static_cast<void *>(static_cast<D3D9Texture *>(tex)->base_texture_get()));
+      }
+    }
   }
 
   sh->constants_upload(device);

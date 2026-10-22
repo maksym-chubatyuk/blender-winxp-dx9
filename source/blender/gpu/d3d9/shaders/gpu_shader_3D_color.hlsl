@@ -50,8 +50,8 @@ VertOut vert(VertIn v)
 float4 frag(VertOut v) : COLOR0
 {
 #ifdef UNIFORM_COLOR
-  return color;
+  return blender_srgb_to_framebuffer_space(color);
 #else
-  return v.color;
+  return blender_srgb_to_framebuffer_space(v.color);
 #endif
 }

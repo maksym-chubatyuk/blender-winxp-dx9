@@ -219,6 +219,10 @@ void SceneState::init(const DRWContext *context,
     /* Only draw using SMAA or no AA when navigating. */
     _samples_len = min_ii(_samples_len, 1);
   }
+  if (!GPU_compute_shader_support()) {
+    /* Shader Model 2.0 hardware: TAA and SMAA are too expensive. */
+    _samples_len = 0;
+  }
   /* 0 samples means no AA */
   draw_aa = _samples_len > 0;
   _samples_len = max_ii(_samples_len, 1);

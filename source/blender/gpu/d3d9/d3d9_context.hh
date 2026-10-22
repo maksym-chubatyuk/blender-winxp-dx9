@@ -22,6 +22,10 @@ class D3D9FrameBuffer;
 class D3D9StateManager;
 class D3D9Shader;
 class D3D9UniformBuf;
+class D3D9StorageBuf;
+
+/** Maximum storage buffer bindings tracked. */
+constexpr int D3D9_MAX_SSBO_SLOTS = 16;
 
 /** Maximum uniform buffer bindings tracked. */
 constexpr int D3D9_MAX_UBO_SLOTS = 16;
@@ -39,6 +43,8 @@ class D3D9Context : public Context {
   IDirect3DDevice9 *device = nullptr;
   /** Uniform buffers bound with #GPU_uniformbuf_bind. */
   D3D9UniformBuf *bound_ubos[D3D9_MAX_UBO_SLOTS] = {};
+  /** Storage buffers bound with #GPU_storagebuf_bind, their data is read by the CPU. */
+  D3D9StorageBuf *bound_ssbos[D3D9_MAX_SSBO_SLOTS] = {};
 
   D3D9Context(GHOST_IWindow *ghost_window, GHOST_IContext *ghost_context);
   ~D3D9Context() override;

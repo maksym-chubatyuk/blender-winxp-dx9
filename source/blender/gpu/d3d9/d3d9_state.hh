@@ -61,6 +61,8 @@ class D3D9StateManager : public StateManager {
 
   void sampler_apply(int unit, GPUSamplerState sampler);
   void texture_bind_apply();
+  /** True when the texture is a color attachment of the active frame-buffer. */
+  bool is_attached(IDirect3DBaseTexture9 *base) const;
 
   IDirect3DDevice9 *device_;
 

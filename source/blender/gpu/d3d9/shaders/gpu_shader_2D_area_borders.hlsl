@@ -52,5 +52,5 @@ float4 frag(VertOut v) : COLOR0
   float dist = (length(v.uv) - (0.98 - width)) * scale;
   float4 c = color;
   c.a *= smoothstep(-0.09, 1.09, dist);
-  return c;
+  return blender_srgb_to_framebuffer_space(c);
 }

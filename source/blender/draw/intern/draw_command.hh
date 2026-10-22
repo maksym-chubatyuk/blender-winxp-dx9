@@ -774,6 +774,10 @@ class DrawMultiBuf {
                          bool use_custom_ids);
 
   void bind(RecordingState &state);
+
+ private:
+  /** Command generation without compute shaders (Shader Model 2.0 hardware). */
+  void generate_commands_cpu(int visibility_word_per_draw, int view_len, bool use_custom_ids);
 };
 
 /** \} */

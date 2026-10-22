@@ -56,8 +56,8 @@ class D3D9StorageBuf : public StorageBuf {
   ~D3D9StorageBuf() override;
 
   void update(const void *data) override;
-  void bind(int /*slot*/) override {}
-  void unbind() override {}
+  void bind(int slot) override;
+  void unbind() override;
   void clear(uint32_t clear_value) override;
   void copy_sub(VertBuf *src, uint dst_offset, uint src_offset, uint copy_size) override;
   void read(void *data) override;
@@ -68,9 +68,14 @@ class D3D9StorageBuf : public StorageBuf {
   {
     return host_data_.data();
   }
+  size_t size_get() const
+  {
+    return host_data_.size();
+  }
 
  private:
   Vector<uint8_t> host_data_;
+  int slot_ = -1;
 };
 
 class D3D9QueryPool : public QueryPool {

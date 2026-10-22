@@ -40,7 +40,7 @@ VertOut vert(VertIn v)
 float4 frag(VertOut v) : COLOR0
 {
   if (udash_factor >= 1.0) {
-    return color;
+    return blender_srgb_to_framebuffer_space(color);
   }
   float distance_along_line = v.screen_pos.x + v.screen_pos.y;
   float normalized_distance = frac(distance_along_line / dash_width);

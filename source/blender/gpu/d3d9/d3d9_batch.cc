@@ -12,6 +12,9 @@
 
 #include "gpu_shader_interface.hh"
 
+#include <cstdio>
+#include <cstdlib>
+
 #include "d3d9_backend.hh"
 #include "d3d9_batch.hh"
 #include "d3d9_buffers.hh"
@@ -159,13 +162,29 @@ void D3D9Batch::draw(int v_first, int v_count, int i_first, int i_count)
   if (!ctx->draw_setup()) {
     return;
   }
+  static const bool trace = getenv("BLENDER_D3D9_TRACE") != nullptr;
   if (!bind_vertex_streams(shader)) {
+    if (trace) {
+      printf("  DROP: vertex streams\n");
+    }
     return;
   }
   D3DPRIMITIVETYPE type;
   uint prim_len;
   if (!d3d9_primitive(prim_type, v_count, type, prim_len)) {
+    if (trace) {
+      printf("  DROP: primitive %d\n", int(prim_type));
+    }
     return;
+  }
+  if (trace) {
+    printf("  issue type=%d prims=%u v_first=%d inst=%d+%d ib=%p\n",
+           int(type),
+           prim_len,
+           v_first,
+           i_first,
+           i_count,
+           static_cast<void *>(elem));
   }
 
   IDirect3DDevice9 *device = ctx->device;
@@ -183,17 +202,28 @@ void D3D9Batch::draw(int v_first, int v_count, int i_first, int i_count)
 
   const bool close_loop = prim_type == GPU_PRIM_LINE_LOOP && v_count > 2 && ib == nullptr;
 
+  const bool per_instance_data = shader->has_instance_data();
   for (int instance = i_first; instance < i_first + i_count; instance++) {
     if (instance != 0 || i_count > 1) {
       ctx->instance_id_set(instance);
     }
+    if (per_instance_data) {
+      shader->instance_data_set(instance);
+      shader->constants_upload(device);
+    }
     if (ib) {
       device->SetIndices(ibo);
-      device->DrawIndexedPrimitive(
+      HRESULT hr = device->DrawIndexedPrimitive(
           type, INT(ib->index_base_get()), 0, vert_range, ib->draw_start_get() + v_first, prim_len);
+      if (trace && FAILED(hr)) {
+        printf("  FAILED DrawIndexedPrimitive %08lx\n", hr);
+      }
     }
     else {
-      device->DrawPrimitive(type, v_first, prim_len);
+      HRESULT hr = device->DrawPrimitive(type, v_first, prim_len);
+      if (trace && FAILED(hr)) {
+        printf("  FAILED DrawPrimitive %08lx\n", hr);
+      }
       if (close_loop) {
         IDirect3DIndexBuffer9 *loop_ibo = D3D9Backend::get()->line_loop_index_buffer();
         if (loop_ibo) {

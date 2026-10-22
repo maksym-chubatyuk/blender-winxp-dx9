@@ -97,6 +97,9 @@ inline void ObjectInfos::sync(const draw::ObjectRef ref,
 
   ob_color = ref.object->color;
   index = ref.object->index;
+  /* The unused bits must be zero too: shaders without integer support read the flags as a float.
+   */
+  flag = eObjectInfoFlag(0);
   SET_FLAG_FROM_TEST(flag, is_active_object, eObjectInfoFlag::OBJECT_ACTIVE);
   SET_FLAG_FROM_TEST(
       flag, ref.object->base_flag & BASE_SELECTED, eObjectInfoFlag::OBJECT_SELECTED);

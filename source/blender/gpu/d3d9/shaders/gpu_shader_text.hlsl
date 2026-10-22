@@ -60,5 +60,5 @@ float4 frag(VertOut v) : COLOR0
   float blur = (4.0 * c + 2.0 * (l + r + t + b) + (tl + tr + bl + br)) * (1.0 / 16.0);
   float outline = max(max(max(c, l), max(r, t)), max(max(b, tl), max(max(br, tr), bl)));
   float alpha = (type < 0.5) ? c : ((type > 5.5) ? outline : blur);
-  return float4(v.color.rgb, alpha * v.color.a);
+  return blender_srgb_to_framebuffer_space(float4(v.color.rgb, alpha * v.color.a));
 }

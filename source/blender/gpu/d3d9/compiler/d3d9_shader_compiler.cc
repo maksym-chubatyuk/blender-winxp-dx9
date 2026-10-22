@@ -16,6 +16,9 @@
  *
  * Manifest lines: `<create info name> <file.hlsl> [DEFINE[=value]...]`, `#` starts a comment.
  * Each file has a `vert` and a `frag` entry point, the vertex input structure is named `VertIn`.
+ * Uniform buffers containing integers declare their layout with a comment line
+ * `// d3d9-ubo <name> <types>`, one character per 32-bit component (f, i, u or b), which lets
+ * the backend convert them to floats.
  *
  * Usage: d3d9_shader_compiler <manifest> <hlsl directory> <output.cc> [disassembly directory]
  */
@@ -183,6 +186,44 @@ static bool compile(const Entry &entry,
   r_code.resize(code->GetBufferSize() / 4);
   memcpy(r_code.data(), code->GetBufferPointer(), r_code.size() * 4);
 
+  /* The compiler doesn't enforce the 2.0 instruction limits, the drivers reject such shaders. */
+  if (d3d_disassemble) {
+    ID3DBlob *text = nullptr;
+    if (SUCCEEDED(d3d_disassemble(code->GetBufferPointer(), code->GetBufferSize(), 0, nullptr, &text)))
+    {
+      const std::string disassembly(static_cast<const char *>(text->GetBufferPointer()),
+                                    text->GetBufferSize());
+      text->Release();
+      int slots = 0, texture = 0, arithmetic = 0;
+      const size_t pos = disassembly.find("// approximately ");
+      if (pos != std::string::npos) {
+        if (sscanf(disassembly.c_str() + pos,
+                   "// approximately %d instruction slots used (%d texture, %d arithmetic)",
+                   &slots,
+                   &texture,
+                   &arithmetic) < 3)
+        {
+          arithmetic = slots;
+        }
+      }
+      const bool is_pixel = profile[0] == 'p';
+      const bool too_long = is_pixel ? (arithmetic > 64 || texture > 32) : (slots > 256);
+      if (too_long) {
+        fprintf(stderr,
+                "d3d9_shader_compiler: %s (%s %s) exceeds the instruction limits: %d slots, %d "
+                "texture, %d arithmetic\n",
+                entry.name.c_str(),
+                entry_point,
+                profile,
+                slots,
+                texture,
+                arithmetic);
+        code->Release();
+        return false;
+      }
+    }
+  }
+
   if (!asm_path.empty() && d3d_disassemble) {
     ID3DBlob *text = nullptr;
     if (SUCCEEDED(d3d_disassemble(code->GetBufferPointer(), code->GetBufferSize(), 0, nullptr, &text)))
@@ -264,6 +305,94 @@ static std::string vertex_attributes(const Entry &entry,
   return result;
 }
 
+/** Source of the file with its includes inlined (for the annotations, comments are kept). */
+static std::string gather_source(const std::string &dir,
+                                 const std::string &file,
+                                 std::vector<std::string> &r_seen)
+{
+  for (const std::string &seen : r_seen) {
+    if (seen == file) {
+      return "";
+    }
+  }
+  r_seen.push_back(file);
+  std::string content;
+  if (!read_file(dir + "/" + file, content)) {
+    return "";
+  }
+  std::string result;
+  std::istringstream lines(content);
+  std::string line;
+  while (std::getline(lines, line)) {
+    /* `#include "file"`, also indented after the '#'. */
+    const size_t hash = line.find_first_not_of(" \t");
+    if (hash != std::string::npos && line[hash] == '#') {
+      const size_t directive = line.find_first_not_of(" \t", hash + 1);
+      if (directive != std::string::npos && line.compare(directive, 7, "include") == 0) {
+        const size_t start = line.find('"', directive + 7);
+        const size_t end = (start != std::string::npos) ? line.find('"', start + 1) :
+                                                          std::string::npos;
+        if (end != std::string::npos) {
+          result += gather_source(dir, line.substr(start + 1, end - start - 1), r_seen);
+        }
+      }
+    }
+    result += line + "\n";
+  }
+  return result;
+}
+
+/**
+ * The `// d3d9-instance` and `// d3d9-resource-id` annotations (per instance data, see
+ * `d3d9_common.hlsl`), without the prefix, separated by ';'.
+ */
+static std::string instance_annotations(const std::string &source)
+{
+  std::string result;
+  std::istringstream lines(source);
+  std::string line;
+  while (std::getline(lines, line)) {
+    for (const char *key : {"// d3d9-instance ", "// d3d9-resource-id "}) {
+      const size_t pos = line.find(key);
+      if (pos == std::string::npos) {
+        continue;
+      }
+      std::string annotation = line.substr(pos + 8);
+      annotation.erase(annotation.find_last_not_of(" \t\r") + 1);
+      if (!result.empty()) {
+        result += ";";
+      }
+      result += annotation;
+    }
+  }
+  return result;
+}
+
+/** `name:types` of the `// d3d9-ubo` annotations of the source, separated by spaces. */
+static std::string ubo_types(const std::string &source)
+{
+  std::string result;
+  std::istringstream lines(source);
+  std::string line;
+  while (std::getline(lines, line)) {
+    const size_t pos = line.find("// d3d9-ubo ");
+    if (pos == std::string::npos) {
+      continue;
+    }
+    std::istringstream words(line.substr(pos + 12));
+    std::string name, types, word;
+    words >> name;
+    while (words >> word) {
+      types += word;
+    }
+    if (!result.empty()) {
+      result += " ";
+    }
+    result += name + ":" + types;
+  }
+  return result;
+}
+
 static void write_array(FILE *out, const char *name, const std::vector<uint32_t> &code)
 {
   fprintf(out, "static const uint32_t %s[] = {", name);
@@ -329,6 +458,8 @@ int main(int argc, char **argv)
       continue;
     }
     const std::string attrs = vertex_attributes(entry, source, dir);
+    std::vector<std::string> seen;
+    const std::string full_source = gather_source(dir, entry.file, seen);
     char name[64];
     snprintf(name, sizeof(name), "sh%zu_vs", i);
     write_array(out, name, vs);
@@ -336,22 +467,24 @@ int main(int argc, char **argv)
     write_array(out, name, ps);
     fprintf(out, "\n");
 
-    char row[512];
+    char row[4096];
     snprintf(row,
              sizeof(row),
-             "    {\"%s\", sh%zu_vs, %zu, sh%zu_ps, %zu, \"%s\"},\n",
+             "    {\"%s\", sh%zu_vs, %zu, sh%zu_ps, %zu, \"%s\", \"%s\", \"%s\"},\n",
              entry.name.c_str(),
              i,
              vs.size() * 4,
              i,
              ps.size() * 4,
-             attrs.c_str());
+             attrs.c_str(),
+             ubo_types(full_source).c_str(),
+             instance_annotations(full_source).c_str());
     table += row;
   }
 
   fprintf(out,
           "const D3D9ShaderBinary d3d9_shader_binaries[] = {\n%s    {nullptr, nullptr, 0, "
-          "nullptr, 0, nullptr},\n};\n\n",
+          "nullptr, 0, nullptr, nullptr, nullptr},\n};\n\n",
           table.c_str());
   fprintf(out,
           "const int d3d9_shader_binaries_len = %zu;\n\n}  // namespace blender::gpu\n",

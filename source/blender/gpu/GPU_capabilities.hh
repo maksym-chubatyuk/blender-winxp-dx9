@@ -62,6 +62,8 @@ bool GPU_use_main_context_workaround();
 bool GPU_use_hq_normals_workaround();
 
 bool GPU_geometry_shader_support();
+/** False for Shader Model 2.0 hardware (Direct3D 9): the draw manager does its GPU work on the CPU. */
+bool GPU_compute_shader_support();
 bool GPU_hdr_support();
 bool GPU_stencil_export_support();
 

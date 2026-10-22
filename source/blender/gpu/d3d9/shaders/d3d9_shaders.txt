@@ -36,3 +36,19 @@ gpu_shader_text                                gpu_shader_text.hlsl
 
 # Backend internal shaders.
 d3d9_internal_blit                             d3d9_internal_blit.hlsl
+
+OCIO_Display                                   ocio_display.hlsl
+
+# Draw engines.
+overlay_background                             overlay_background.hlsl
+overlay_antialiasing_pipeline                  overlay_antialiasing.hlsl
+workbench_prepass_mesh_opaque_studio_material_no_clip   workbench_prepass.hlsl
+workbench_prepass_mesh_opaque_flat_material_no_clip     workbench_prepass.hlsl
+workbench_prepass_mesh_opaque_studio_material_clip      workbench_prepass.hlsl
+workbench_prepass_mesh_opaque_flat_material_clip        workbench_prepass.hlsl
+workbench_resolve_opaque_studio_no_cavity_no_curvature_no_shadow   workbench_resolve.hlsl
+workbench_resolve_opaque_flat_no_cavity_no_curvature_no_shadow     workbench_resolve.hlsl FLAT
+overlay_grid_next                              overlay_grid.hlsl
+overlay_outline_prepass_mesh                   overlay_outline.hlsl PREPASS
+overlay_outline_detect                         overlay_outline.hlsl DETECT
+overlay_extra                                  overlay_extra.hlsl

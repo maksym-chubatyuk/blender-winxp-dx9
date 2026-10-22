@@ -78,7 +78,28 @@ D3D9StorageBuf::D3D9StorageBuf(size_t size, const char *name) : StorageBuf(size,
   host_data_.resize(size, 0);
 }
 
-D3D9StorageBuf::~D3D9StorageBuf() = default;
+D3D9StorageBuf::~D3D9StorageBuf()
+{
+  this->unbind();
+}
+
+void D3D9StorageBuf::bind(int slot)
+{
+  if (slot < 0 || slot >= D3D9_MAX_SSBO_SLOTS) {
+    return;
+  }
+  D3D9Context::get()->bound_ssbos[slot] = this;
+  slot_ = slot;
+}
+
+void D3D9StorageBuf::unbind()
+{
+  D3D9Context *ctx = D3D9Context::get();
+  if (ctx && slot_ >= 0 && ctx->bound_ssbos[slot_] == this) {
+    ctx->bound_ssbos[slot_] = nullptr;
+  }
+  slot_ = -1;
+}
 
 void D3D9StorageBuf::update(const void *data)
 {

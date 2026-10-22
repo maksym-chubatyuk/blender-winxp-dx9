@@ -103,5 +103,5 @@ float4 frag(VertOut v) : COLOR0
   }
   c *= max(mask_transparency, mask);
 #endif
-  return c;
+  return blender_srgb_to_framebuffer_space(c);
 }

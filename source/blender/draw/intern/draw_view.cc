@@ -16,6 +16,8 @@
 
 #include "draw_context_private.hh"
 #include "draw_shader.hh"
+#include "GPU_capabilities.hh"
+
 #include "draw_view.hh"
 
 #include "draw_debug.hh"
@@ -242,6 +244,11 @@ void View::compute_procedural_bounds()
   /* Add 2 to always have a non-null number even in case of overflow. */
   sync_counter_ = (global_sync_counter_ += 2);
 
+  if (!GPU_compute_shader_support()) {
+    /* No culling without compute shaders. */
+    return;
+  }
+
   GPU_debug_group_begin("View.compute_procedural_bounds");
 
   gpu::Shader *shader = DRW_shader_draw_view_finalize_get();
@@ -286,7 +293,7 @@ void View::compute_visibility(ObjectBoundsBuf &bounds,
   const uint32_t data = 0xFFFFFFFFu;
   GPU_storagebuf_clear(visibility_buf_, data);
 
-  if (do_visibility_) {
+  if (do_visibility_ && GPU_compute_shader_support()) {
     gpu::Shader *shader = DRW_shader_draw_visibility_compute_get();
     GPU_shader_bind(shader);
     GPU_shader_uniform_1i(shader, "resource_len", resource_len);

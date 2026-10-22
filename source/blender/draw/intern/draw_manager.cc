@@ -17,6 +17,8 @@
 #include "draw_context_private.hh"
 #include "draw_debug.hh"
 #include "draw_defines.hh"
+#include "GPU_capabilities.hh"
+
 #include "draw_manager.hh"
 #include "draw_pass.hh"
 #include "draw_shader.hh"
@@ -117,6 +119,19 @@ void Manager::end_sync()
 
   sync_layer_attributes();
 
+  if (!GPU_compute_shader_support()) {
+    /* Part of `draw_resource_finalize_comp.glsl` the shaders need, the bounds are only used for
+     * culling which isn't done on the CPU. */
+    for (const int resource_id : IndexRange(resource_len_)) {
+      ObjectInfos &infos = infos_buf.current()[resource_id];
+      const float3 loc = infos.orco_add;  /* Box center. */
+      const float3 size = infos.orco_mul; /* Box half-extent. */
+      const float3 orco_mul = math::safe_rcp(size * 2.0f);
+      infos.orco_add = (loc - size) * -orco_mul;
+      infos.orco_mul = orco_mul;
+    }
+  }
+
   matrix_buf.current().push_update();
   bounds_buf.current().push_update();
   infos_buf.current().push_update();
@@ -128,6 +143,12 @@ void Manager::end_sync()
   // debug_bind();
 
   DRW_submission_start();
+
+  if (!GPU_compute_shader_support()) {
+    DRW_submission_end();
+    GPU_debug_group_end();
+    return;
+  }
 
   /* Dispatch compute to finalize the resources on GPU. Save a bit of CPU time. */
   uint thread_groups = divide_ceil_u(resource_len_, DRW_FINALIZE_GROUP_SIZE);

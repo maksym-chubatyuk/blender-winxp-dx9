@@ -411,7 +411,10 @@ void D3D9StateManager::sampler_apply(int unit, GPUSamplerState sampler)
   const bool can_filter = tex == nullptr || tex->is_filterable();
   const bool is_pow2 = tex == nullptr || (is_power_of_2_i(tex->device_width()) &&
                                           is_power_of_2_i(tex->device_height()));
-  const bool srgb = tex && tex->format_get() == TextureFormat::SRGBA_8_8_8_8;
+  /* Render targets store linear values (there is no sRGB encoding on write), only uploaded sRGB
+   * data is decoded. */
+  const bool srgb = tex && tex->format_get() == TextureFormat::SRGBA_8_8_8_8 &&
+                    !tex->is_render_target();
 
   /* Pack everything into a key to skip redundant state changes. */
   uint32_t key = uint32_t(sampler.filtering) | uint32_t(sampler.extend_x) << 8 |
@@ -476,6 +479,20 @@ void D3D9StateManager::sampler_apply(int unit, GPUSamplerState sampler)
   device_->SetSamplerState(unit, D3DSAMP_SRGBTEXTURE, srgb ? TRUE : FALSE);
 }
 
+bool D3D9StateManager::is_attached(IDirect3DBaseTexture9 *base) const
+{
+  if (active_fb == nullptr) {
+    return false;
+  }
+  for (int slot = 0; slot < D3D9_MAX_RENDER_TARGETS; slot++) {
+    Texture *tex = active_fb->color_tex(slot);
+    if (tex && static_cast<D3D9Texture *>(tex)->base_texture_get() == base) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void D3D9StateManager::texture_bind_apply()
 {
   for (int unit = 0; unit < D3D9_MAX_SAMPLERS; unit++) {
@@ -486,6 +503,10 @@ void D3D9StateManager::texture_bind_apply()
     }
     D3D9Texture *tex = textures_[unit];
     IDirect3DBaseTexture9 *base = tex ? tex->base_texture_get() : nullptr;
+    if (base && is_attached(base)) {
+      /* Sampling a render target of the draw is undefined: drivers drop the draw's writes. */
+      base = nullptr;
+    }
     if (device_textures_[unit] != base) {
       device_->SetTexture(unit, base);
       device_textures_[unit] = base;

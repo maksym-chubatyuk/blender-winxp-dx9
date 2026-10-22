@@ -27,6 +27,10 @@ struct D3D9ShaderBinary {
   uint32_t ps_size;
   /** Vertex shader attributes: `name:location` pairs separated by spaces. */
   const char *attrs;
+  /** Component types of uniform buffers: `name:types` pairs (see `d3d9_common.hlsl`). */
+  const char *ubo_types;
+  /** Per instance data annotations, separated by ';' (see `d3d9_common.hlsl`). */
+  const char *instance_data;
 };
 
 extern const D3D9ShaderBinary d3d9_shader_binaries[];
@@ -120,6 +124,14 @@ class D3D9Shader : public Shader {
     return uses_vertex_id_;
   }
 
+  /** The shader reads per instance data (object matrices...) from storage buffers. */
+  bool has_instance_data() const
+  {
+    return !instance_data_.is_empty();
+  }
+  /** Copy the per instance data of an instance to the constants. */
+  void instance_data_set(int instance);
+
   /** First constants of each stage, for debug traces. */
   const float4 *ps_constants_get() const
   {
@@ -154,16 +166,39 @@ class D3D9Shader : public Shader {
   /** Uniform buffer copied to the constants named after it. */
   struct UniformBlock {
     int slot = 0;
+    /** First register of the buffer copied (constants named `<block>__<register>`). */
+    int src_offset = 0;
+    /** One character per 32-bit component: f(loat), i(nt), u(int) or b(ool), empty for floats. */
+    std::string types;
     int16_t vs_reg = -1;
     int16_t vs_len = 0;
     int16_t ps_reg = -1;
     int16_t ps_len = 0;
   };
 
+  /** Element of a storage buffer copied to constants for each instance. */
+  struct InstanceData {
+    int16_t vs_reg = -1;
+    int16_t vs_len = 0;
+    int16_t ps_reg = -1;
+    int16_t ps_len = 0;
+    int slot = 0;
+    int stride = 0;
+    int offset = 0;
+    /** Element index: 0 resource id, 1 custom id, 2 the instance itself. */
+    int index_source = 0;
+    std::string types;
+  };
+  void parse_instance_data(const D3D9ShaderBinary &binary);
+
   /** Name of each uniform location, to find it in the constant tables. */
   Vector<std::string> uniform_names_;
   Vector<Uniform> uniforms_;
   Vector<UniformBlock> ubo_blocks_;
+  Vector<InstanceData> instance_data_;
+  /** Storage buffer slot of the resource ids, and number of words per instance. */
+  int resource_id_slot_ = -1;
+  int resource_id_stride_ = 1;
 
   /** CPU copy of the constant registers and the dirty register ranges. */
   Vector<float4> vs_constants_;

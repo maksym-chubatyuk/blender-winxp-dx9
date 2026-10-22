@@ -86,5 +86,5 @@ float4 frag(VertOut v) : COLOR0
   float falloff = v.shadow.x;
   float shadow_alpha = alpha * (falloff * falloff * 0.722 + falloff * 0.277);
   float inner_alpha = smoothstep(0.0, 0.05, v.shadow.y);
-  return float4(0.0, 0.0, 0.0, inner_alpha * shadow_alpha);
+  return float4(0.0, 0.0, 0.0, inner_alpha * shadow_alpha); /* Black: same in any space. */
 }

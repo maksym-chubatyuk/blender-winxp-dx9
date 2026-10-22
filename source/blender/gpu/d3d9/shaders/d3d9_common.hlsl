@@ -28,9 +28,12 @@ float4 gpu_position(float4 p)
   return p;
 }
 
-/* sRGB render targets store the sRGB encoded values written by the shaders (there is no linear to
- * sRGB conversion on write), so colors already in sRGB space are written as is. */
-#define blender_srgb_to_framebuffer_space(a) (a)
+/* sRGB render targets store linear values: there is no linear to sRGB encoding on write (and
+ * they are sampled without decoding). Shaders writing sRGB colors (the UI) convert them when
+ * `srgbTarget` is set, with a gamma 2 approximation to save instructions. */
+float srgbTarget;
+#define blender_srgb_to_framebuffer_space(col) \
+  float4(lerp((col).rgb, (col).rgb * (col).rgb, srgbTarget), (col).a)
 
 /* Pixel position in the viewport (OpenGL orientation) of a clip space position, for fragment
  * shaders using `gl_FragCoord` (ps_2_0 has no `VPOS`). Interpolate it as a varying. */
@@ -45,3 +48,16 @@ float gpu_pixel_size_y(float4x4 projection)
 {
   return 2.0 * abs(gpu_d3d9_pixel_ofs.y) / max(abs(projection[1][1]), 1e-8);
 }
+
+/* Uniform buffers are copied to the float4 array constant named after the block, or from a given
+ * register on to a constant named `<block>__<register>` (pixel shaders only have 32 constants).
+ * When they hold integers, annotate the layout so they are converted to floats:
+ * `d3d9-ubo <block name> <types>` comment line, one character per 32-bit component (f, i, u or b).
+ *
+ * Storage buffers can't be read by shaders. Data of the drawn instance is copied to constants:
+ * `d3d9-resource-id <slot> <words per instance>` comment line: buffer of the draw manager resource ids
+ *   (followed by the custom id when there are 2 words).
+ * `d3d9-instance <constant> <slot> <element size> <offset> <index> <types>` comment line: copy the element
+ *   (index `res`: resource id, `custom`: custom id, `instance`: instance index) of the storage
+ *   buffer bound to the slot. Types are per 32-bit word (f, i, u, b), `B` unpacks a word into 4
+ *   normalized bytes (4 components). */

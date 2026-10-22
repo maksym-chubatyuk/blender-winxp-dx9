@@ -44,6 +44,7 @@ struct GPUCapabilities {
 
   bool mem_stats_support = false;
   bool geometry_shader_support = false;
+  bool compute_shader_support = true;
   bool hdr_viewport_support = false;
   bool stencil_export_support = false;
 

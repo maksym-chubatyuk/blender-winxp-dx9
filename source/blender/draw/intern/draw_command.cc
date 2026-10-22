@@ -793,6 +793,75 @@ void DrawCommandBuf::bind(RecordingState & /*state*/)
   GPU_storagebuf_bind(resource_id_buf_, DRW_RESOURCE_ID_SLOT);
 }
 
+void DrawMultiBuf::generate_commands_cpu(const int visibility_word_per_draw,
+                                         const int view_len,
+                                         const bool use_custom_ids)
+{
+  /* Same as `draw_command_generate_comp.glsl`. There is no culling: everything is visible. */
+  const uint view_shift = log2_ceil_u(uint(view_len));
+  const uint id_stride = use_custom_ids ? 2 : 1;
+  MutableSpan<DrawGroup> groups(group_buf_.data(), group_count_);
+  for (DrawGroup &group : groups) {
+    group.total_counter = group.front_facing_counter = group.back_facing_counter = 0;
+  }
+
+  for (const DrawPrototype &proto : Span<DrawPrototype>(prototype_buf_.data(), prototype_count_)) {
+    DrawGroup &group = groups[proto.group_id];
+    const bool is_inverted = (proto.res_id & 0x80000000u) != 0;
+    const uint resource_id = proto.res_id & 0x7FFFFFFFu;
+    const uint visible_instance_len = (visibility_word_per_draw > 0) ? uint(view_len) :
+                                                                       proto.instance_len;
+    const uint back_facing_len = (group.len - group.front_facing_len) * uint(view_len);
+    uint dst_index = group.start * uint(view_len);
+    if (is_inverted) {
+      dst_index += group.back_facing_counter;
+      group.back_facing_counter += visible_instance_len;
+    }
+    else {
+      dst_index += back_facing_len + group.front_facing_counter;
+      group.front_facing_counter += visible_instance_len;
+    }
+    group.total_counter += proto.instance_len;
+
+    for (uint i = 0; i < visible_instance_len; i++, dst_index++) {
+      const uint id = (visibility_word_per_draw > 0) ? (i | (resource_id << view_shift)) :
+                                                       resource_id;
+      resource_id_buf_[dst_index * id_stride] = id;
+      if (use_custom_ids) {
+        resource_id_buf_[dst_index * id_stride + 1] = proto.custom_id;
+      }
+    }
+  }
+
+  for (const int group_id : groups.index_range()) {
+    DrawGroup &group = groups[group_id];
+    const uint starts[2] = {group.start * uint(view_len),
+                            (group.start + (group.len - group.front_facing_len)) *
+                                uint(view_len)};
+    const uint lens[2] = {group.back_facing_counter, group.front_facing_counter};
+    for (int facing = 0; facing < 2; facing++) {
+      DrawCommand &cmd = command_buf_[group_id * 2 + facing];
+      if (group.base_index != -1) {
+        cmd.indexed().vertex_len = uint(group.vertex_len);
+        cmd.indexed().instance_len = lens[facing];
+        cmd.indexed().vertex_first = uint(group.vertex_first);
+        cmd.indexed().base_index = uint(group.base_index);
+        cmd.indexed().instance_first = starts[facing];
+      }
+      else {
+        cmd.array().vertex_len = uint(group.vertex_len);
+        cmd.array().instance_len = lens[facing];
+        cmd.array().vertex_first = uint(group.vertex_first);
+        cmd.array().instance_first = starts[facing];
+      }
+    }
+    group.total_counter = group.front_facing_counter = group.back_facing_counter = 0;
+  }
+
+  resource_id_buf_.push_update();
+  command_buf_.push_update();
+}
+
 void DrawMultiBuf::generate_commands(Vector<Header, 0> & /*headers*/,
                                      Vector<Undetermined, 0> & /*commands*/,
                                      VisibilityBuf &visibility_buf,
@@ -852,7 +921,10 @@ void DrawMultiBuf::generate_commands(Vector<Header, 0> & /*headers*/,
   /* Two commands per group (inverted and non-inverted scale). */
   command_buf_.get_or_resize(group_count_ * 2);
 
-  if (prototype_count_ > 0) {
+  if (prototype_count_ > 0 && !GPU_compute_shader_support()) {
+    generate_commands_cpu(visibility_word_per_draw, view_len, use_custom_ids);
+  }
+  else if (prototype_count_ > 0) {
     gpu::Shader *shader = DRW_shader_draw_command_generate_get();
     GPU_shader_bind(shader);
     GPU_shader_uniform_1i(shader, "prototype_len", prototype_count_);

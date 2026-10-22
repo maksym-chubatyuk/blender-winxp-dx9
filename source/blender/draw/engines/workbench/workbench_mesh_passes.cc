@@ -4,6 +4,8 @@
 
 #include "workbench_private.hh"
 
+#include "GPU_capabilities.hh"
+
 namespace blender::workbench {
 
 /* -------------------------------------------------------------------- */
@@ -124,7 +126,14 @@ void OpaquePass::sync(const SceneState &scene_state, SceneResources &resources)
   gbuffer_ps_.init_subpasses(ePipelineType::OPAQUE, scene_state.lighting_type, clip);
 
   deferred_ps_.init();
-  deferred_ps_.state_set(DRW_STATE_WRITE_COLOR);
+  if (GPU_compute_shader_support()) {
+    deferred_ps_.state_set(DRW_STATE_WRITE_COLOR);
+  }
+  else {
+    /* Shader Model 2.0 hardware can't sample the depth to skip the background: the resolve
+     * triangle is drawn on the far plane and only passes the depth test over the geometry. */
+    deferred_ps_.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_DEPTH_GREATER);
+  }
   deferred_ps_.shader_set(ShaderCache::get().resolve_get(scene_state.lighting_type,
                                                          scene_state.draw_cavity,
                                                          scene_state.draw_curvature,
@@ -149,8 +158,11 @@ void OpaquePass::draw(Manager &manager,
   if (is_empty()) {
     return;
   }
+  /* Multiple render targets need the same bit depth on Shader Model 2.0 hardware. */
   gbuffer_material_tx.acquire_2d(resolution,
-                                 gpu::TextureFormat::SFLOAT_16_16_16_16,
+                                 GPU_compute_shader_support() ?
+                                     gpu::TextureFormat::SFLOAT_16_16_16_16 :
+                                     gpu::TextureFormat::UNORM_8_8_8_8,
                                  GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_ATTACHMENT);
   gbuffer_normal_tx.acquire_2d(resolution,
                                gpu::TextureFormat::SFLOAT_16_16,
@@ -208,7 +220,9 @@ void OpaquePass::draw(Manager &manager,
 
   if (!shadow_pass || !shadow_pass->is_debug()) {
     /** Don't override the shadow debug output. */
-    deferred_fb.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(resources.color_tx));
+    deferred_fb.ensure(GPU_compute_shader_support() ? GPU_ATTACHMENT_NONE :
+                                                      GPU_ATTACHMENT_TEXTURE(resources.depth_tx),
+                       GPU_ATTACHMENT_TEXTURE(resources.color_tx));
     deferred_fb.bind();
     manager.submit(deferred_ps_, view);
   }

@@ -177,6 +177,7 @@ void D3D9Backend::capabilities_init()
   GCaps.extension_get = d3d9_extension_get;
   GCaps.mem_stats_support = true;
   GCaps.geometry_shader_support = false;
+  GCaps.compute_shader_support = false;
   GCaps.hdr_viewport_support = false;
   GCaps.stencil_export_support = false;
   GCaps.max_parallel_compilations = 0;
