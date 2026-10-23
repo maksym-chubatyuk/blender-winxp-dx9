@@ -281,7 +281,7 @@ void D3D9Context::end_frame()
 
 void D3D9Context::flush()
 {
-  D3D9_HEAP_CHECK_SCOPE("D3D9Context::flush");
+  D3D9_HEAP_CHECK_SCOPE_DRAW("D3D9Context::flush");
   end_scene();
 }
 

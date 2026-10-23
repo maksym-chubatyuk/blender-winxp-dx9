@@ -35,7 +35,7 @@ D3D9UniformBuf::~D3D9UniformBuf()
 
 void D3D9UniformBuf::update(const void *data)
 {
-  D3D9_HEAP_CHECK_SCOPE("D3D9UniformBuf::update");
+  D3D9_HEAP_CHECK_SCOPE_DRAW("D3D9UniformBuf::update");
   memcpy(host_data_.data(), data, size_in_bytes_);
 }
 

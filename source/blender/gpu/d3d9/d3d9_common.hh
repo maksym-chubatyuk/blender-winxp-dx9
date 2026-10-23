@@ -52,20 +52,25 @@ template<typename T> inline void d3d9_release(T *&ptr)
 }
 
 /**
- * `BLENDER_D3D9_HEAPCHECK=1`: validate the process heap (the C runtime's and the managed resources'
- * system copies) after the operation named `where`, report the first one after which it is corrupt.
+ * `BLENDER_D3D9_HEAPCHECK=<level>`: validate the process heap (the C runtime's and the managed
+ * resources' system copies) after the operation named `where`, report the first one after which it
+ * is corrupt. Level 1 checks after uploads, read-backs and frames, level 2 after every draw too
+ * (very slow).
  */
-void d3d9_heap_check(const char *where);
+void d3d9_heap_check(const char *where, int level = 1);
 
 /** Runs #d3d9_heap_check when the scope ends (every return of a function). */
 struct D3D9HeapCheckScope {
   const char *where;
+  int level;
   ~D3D9HeapCheckScope()
   {
-    d3d9_heap_check(where);
+    d3d9_heap_check(where, level);
   }
 };
-#define D3D9_HEAP_CHECK_SCOPE(where) const D3D9HeapCheckScope d3d9_heap_check_scope_{where}
+#define D3D9_HEAP_CHECK_SCOPE(where) const D3D9HeapCheckScope d3d9_heap_check_scope_{where, 1}
+#define D3D9_HEAP_CHECK_SCOPE_DRAW(where) \
+  const D3D9HeapCheckScope d3d9_heap_check_scope_{where, 2}
 
 /** Report a failed D3D call (once per call site), returns true on success. */
 bool d3d9_check(HRESULT hr, const char *call, const char *file, int line);

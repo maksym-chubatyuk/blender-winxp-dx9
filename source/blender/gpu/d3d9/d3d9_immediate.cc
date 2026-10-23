@@ -41,7 +41,7 @@ uchar *D3D9Immediate::begin()
 
 void D3D9Immediate::end()
 {
-  D3D9_HEAP_CHECK_SCOPE("D3D9Immediate::end");
+  D3D9_HEAP_CHECK_SCOPE_DRAW("D3D9Immediate::end");
   BLI_assert(prim_type != GPU_PRIM_NONE);
   uint vert_len = strict_vertex_len ? vertex_len : vertex_idx;
   if (vert_len == 0) {

@@ -29,12 +29,14 @@ namespace blender::gpu {
 
 static CLG_LogRef LOG = {"gpu.d3d9"};
 
-void d3d9_heap_check(const char *where)
+void d3d9_heap_check(const char *where, int level)
 {
-  static const bool enabled = getenv("BLENDER_D3D9_HEAPCHECK") != nullptr;
+  static const int enabled_level = getenv("BLENDER_D3D9_HEAPCHECK") ?
+                                       atoi(getenv("BLENDER_D3D9_HEAPCHECK")) :
+                                       0;
   static bool reported = false;
   static const char *last_ok = "start";
-  if (!enabled || reported) {
+  if (level > enabled_level || reported) {
     return;
   }
   if (HeapValidate(GetProcessHeap(), 0, nullptr)) {
