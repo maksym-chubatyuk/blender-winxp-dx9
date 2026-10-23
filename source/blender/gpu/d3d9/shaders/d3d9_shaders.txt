@@ -33,6 +33,10 @@ gpu_shader_2D_diag_stripes                     gpu_shader_2D_pattern.hlsl STRIPE
 gpu_shader_3D_line_dashed_uniform_color        gpu_shader_line_dashed.hlsl
 gpu_shader_3D_line_dashed_uniform_color_clipped gpu_shader_line_dashed.hlsl
 gpu_shader_text                                gpu_shader_text.hlsl
+gpu_shader_2D_node_socket                      gpu_shader_2D_node_socket.hlsl
+gpu_shader_2D_node_socket_inst                 gpu_shader_2D_node_socket.hlsl INSTANCED
+gpu_shader_2D_nodelink                         gpu_shader_2D_nodelink.hlsl
+gpu_shader_2D_point_uniform_size_uniform_color_aa gpu_shader_2D_point_aa.hlsl
 
 # Backend internal shaders.
 d3d9_internal_blit                             d3d9_internal_blit.hlsl
