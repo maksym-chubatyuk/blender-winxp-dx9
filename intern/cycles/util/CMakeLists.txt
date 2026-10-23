@@ -29,6 +29,7 @@ set(SRC
   string.cpp
   system.cpp
   task.cpp
+  tbb_compat.cpp
   thread.cpp
   time.cpp
   transform.cpp
@@ -119,6 +120,7 @@ set(SRC_HEADERS
   system.h
   task.h
   tbb.h
+  tbb_compat.h
   thread.h
   time.h
   transform.h

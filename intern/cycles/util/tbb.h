@@ -10,19 +10,24 @@
 #  include "util/windows.h"
 #endif
 
-#include <tbb/blocked_range2d.h>
-#include <tbb/blocked_range3d.h>
-#include <tbb/enumerable_thread_specific.h>
-#include <tbb/parallel_for.h>
-#include <tbb/parallel_for_each.h>
-#include <tbb/parallel_reduce.h>
-#include <tbb/task_arena.h>
-#include <tbb/task_group.h>
-
-#if TBB_INTERFACE_VERSION_MAJOR >= 10
+#ifdef WITH_CYCLES_TBB_COMPAT
+#  include "util/tbb_compat.h"
 #  define WITH_TBB_GLOBAL_CONTROL
-#  define TBB_PREVIEW_GLOBAL_CONTROL 1
-#  include <tbb/global_control.h>
+#else
+#  include <tbb/blocked_range2d.h>
+#  include <tbb/blocked_range3d.h>
+#  include <tbb/enumerable_thread_specific.h>
+#  include <tbb/parallel_for.h>
+#  include <tbb/parallel_for_each.h>
+#  include <tbb/parallel_reduce.h>
+#  include <tbb/task_arena.h>
+#  include <tbb/task_group.h>
+
+#  if TBB_INTERFACE_VERSION_MAJOR >= 10
+#    define WITH_TBB_GLOBAL_CONTROL
+#    define TBB_PREVIEW_GLOBAL_CONTROL 1
+#    include <tbb/global_control.h>
+#  endif
 #endif
 
 CCL_NAMESPACE_BEGIN

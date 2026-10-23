@@ -1,0 +1,13 @@
+--- a/src/libutil/thread.cpp
++++ b/src/libutil/thread.cpp
+@@ -218,7 +218,9 @@
+             this->isDone = true;  // give the waiting threads a command to finish
+         }
+ 
+-#if defined(_WIN32)
++        // MinGW: `native_handle()` is a winpthreads id, not a thread HANDLE. GetExitCodeThread fails
++        // on it, the threads would look terminated and never be told to stop: join hangs at exit.
++#if defined(_WIN32) && !defined(__MINGW32__)
+         // When the static variable in default_thread_pool() is destroyed during DLL unloading,
+         // the thread_pool destructor is called but the threads are already terminated.
+         // So it is illegal to communicate with those other threads at this point.

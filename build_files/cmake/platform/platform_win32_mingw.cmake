@@ -162,6 +162,9 @@ set(PLATFORM_CFLAGS
 )
 string(APPEND CMAKE_C_FLAGS " ${PLATFORM_CFLAGS}")
 string(APPEND CMAKE_CXX_FLAGS " ${PLATFORM_CFLAGS}")
+# `-faligned-new=8`: 32-bit Windows `malloc` (and so plain `operator new`) only returns 8-byte
+# aligned memory, GCC assumes 16. Types aligned to 16 (Cycles' SSE types) get aligned `new`.
+string(APPEND CMAKE_CXX_FLAGS " -faligned-new=8")
 
 string(APPEND PLATFORM_LINKFLAGS " -mconsole -Wl,--stack,2097152")
 

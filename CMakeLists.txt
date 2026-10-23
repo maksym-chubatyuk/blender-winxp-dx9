@@ -625,6 +625,10 @@ option(WITH_CYCLES_KERNEL_ASAN "\
 Build Cycles kernels with address sanitizer when WITH_COMPILER_ASAN is on, even if it's very slow"
   OFF
 )
+option(WITH_CYCLES_KERNEL_SSE2 "\
+Build the Cycles CPU kernel with SSE2 on 32-bit x86 (otherwise it uses no SIMD instructions)"
+  ON
+)
 set(CYCLES_TEST_DEVICES CPU CACHE STRING "\
 Run regression tests on the specified device types \
 (CPU CUDA OPTIX HIP HIP-RT METAL METAL-RT ONEAPI ONEAPI-RT)"
@@ -634,6 +638,7 @@ Run additional Cycles test with OSL enabled"
   OFF
 )
 mark_as_advanced(WITH_CYCLES_KERNEL_ASAN)
+mark_as_advanced(WITH_CYCLES_KERNEL_SSE2)
 mark_as_advanced(WITH_CYCLES_DEBUG_NAN)
 mark_as_advanced(WITH_CYCLES_NATIVE_ONLY)
 mark_as_advanced(WITH_CYCLES_PRECOMPUTE)
@@ -1330,7 +1335,7 @@ if(WITH_CYCLES)
   set_and_warn_dependency(WITH_CYCLES_OSL WITH_CYCLES_TEST_OSL  OFF)
 endif()
 
-set_and_warn_dependency(WITH_TBB WITH_CYCLES            OFF)
+# Without TBB, Cycles uses a small thread pool of its own (`intern/cycles/util/tbb_compat.h`).
 set_and_warn_dependency(WITH_TBB WITH_USD               OFF)
 set_and_warn_dependency(WITH_TBB WITH_OPENVDB           OFF)
 set_and_warn_dependency(WITH_TBB WITH_MOD_FLUID         OFF)

@@ -20,7 +20,11 @@
 
 /* NOTE: Use tbb/spin_mutex.h instead of util_tbb.h because some of the TBB
  * functionality requires RTTI, which is disabled for OSL kernel. */
-#include <tbb/spin_mutex.h>
+#ifdef WITH_CYCLES_TBB_COMPAT
+#  include "util/tbb_compat.h"
+#else
+#  include <tbb/spin_mutex.h>
+#endif
 
 CCL_NAMESPACE_BEGIN
 

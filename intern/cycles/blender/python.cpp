@@ -26,6 +26,7 @@
 #include "util/task.h"
 #include "util/types.h"
 
+#include "GPU_matrix.hh"
 #include "GPU_state.hh"
 
 #include "DNA_screen_types.h"
@@ -352,7 +353,19 @@ static PyObject *view_draw_func(PyObject * /*self*/, PyObject *args)
     int viewport[4];
     blender::GPU_viewport_size_get_i(viewport);
 
+    /* XP port: the viewport may render at a reduced resolution (#GPU_viewport_render_scale_set),
+     * smaller than the region whose pixel space is set up for drawing. Render at the viewport's
+     * resolution and scale the drawing to the region. */
+    float projection[4][4];
+    blender::GPU_matrix_projection_get(projection);
+    const float region_width = 2.0f / projection[0][0];
+    const float region_height = 2.0f / projection[1][1];
+    blender::GPU_matrix_push();
+    blender::GPU_matrix_scale_2f(region_width / viewport[2], region_height / viewport[3]);
+
     session->view_draw(viewport[2], viewport[3]);
+
+    blender::GPU_matrix_pop();
   }
 
   Py_RETURN_NONE;

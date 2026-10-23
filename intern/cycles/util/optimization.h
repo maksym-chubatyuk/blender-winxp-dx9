@@ -8,9 +8,15 @@
 
 /* x86
  *
- * Compile a regular kernel. */
+ * Compile a regular kernel, with SSE2 when the compiler targets it (Pentium 4, Windows XP port).
+ * SSE4 code paths have SSE2 or scalar fallbacks. */
 
-#  if defined(i386) || defined(_M_IX86)
+#  if defined(i386) || defined(__i386__) || defined(_M_IX86)
+
+#    if defined(WITH_KERNEL_SSE2) && (defined(__SSE2__) || defined(_M_IX86_FP))
+#      define __KERNEL_SSE__
+#      define __KERNEL_SSE2__
+#    endif
 
 /* x86-64
  *

@@ -33,6 +33,8 @@
 #  define SIMD_SET_FLUSH_TO_ZERO \
     _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON); \
     _MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON);
+#elif (defined(__i386__) || defined(_M_IX86)) && defined(__KERNEL_SSE2__)
+#  define SIMD_SET_FLUSH_TO_ZERO simd_set_flush_to_zero_x86();
 #elif defined(__aarch64__) || defined(_M_ARM64)
 /* The get/set denormals to zero was implemented in sse2neon v1.5.0.
  * Keep the compatibility code until the minimum library version is increased. */
@@ -124,6 +126,62 @@ static struct PosInfTy {
 
 static struct StepTy {
 } step ccl_attr_maybe_unused;
+
+#  if defined(__i386__) || defined(_M_IX86)
+/* Flush denormals to zero, and treat denormal inputs as zero when the CPU can (early Pentium 4
+ * can't, setting the bit faults there): `FXSAVE` stores the MXCSR bits that can be set. */
+__forceinline void simd_set_flush_to_zero_x86()
+{
+  _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
+  alignas(16) uint8_t state[512] = {};
+  asm volatile("fxsave %0" : "=m"(state));
+  uint32_t mxcsr_mask = uint32_t(state[28]) | (uint32_t(state[29]) << 8) |
+                        (uint32_t(state[30]) << 16) | (uint32_t(state[31]) << 24);
+  if (mxcsr_mask == 0) {
+    /* The default mask, without denormals-are-zero. */
+    mxcsr_mask = 0xFFBF;
+  }
+  const uint32_t denormals_are_zero = 1 << 6;
+  if (mxcsr_mask & denormals_are_zero) {
+    _mm_setcsr(_mm_getcsr() | denormals_are_zero);
+  }
+}
+#  endif
+
+#  if !defined(__KERNEL_SSE42__) && !defined(__KERNEL_NEON__)
+/* SSE2 versions of the SSE4.1 rounding instructions (32-bit x86, Pentium 4).
+ * Values of 2^23 and more (and NaN) are integers already, they are returned as they are. Results
+ * of zero keep the sign of the input, like with SSE4.1. */
+__forceinline __m128 sse2_select_rounded(const __m128 a, const __m128 rounded)
+{
+  const __m128 sign = _mm_set1_ps(-0.0f);
+  const __m128 is_small = _mm_cmplt_ps(_mm_andnot_ps(sign, a), _mm_set1_ps(8388608.0f));
+  const __m128 signed_rounded = _mm_or_ps(rounded, _mm_and_ps(a, sign));
+  return _mm_or_ps(_mm_and_ps(is_small, signed_rounded), _mm_andnot_ps(is_small, a));
+}
+
+/* Round to nearest, ties to even (the default rounding mode). */
+__forceinline __m128 sse2_round_ps(const __m128 a)
+{
+  return sse2_select_rounded(a, _mm_cvtepi32_ps(_mm_cvtps_epi32(a)));
+}
+
+__forceinline __m128 sse2_floor_ps(const __m128 a)
+{
+  const __m128 truncated = _mm_cvtepi32_ps(_mm_cvttps_epi32(a));
+  const __m128 one = _mm_set1_ps(1.0f);
+  return sse2_select_rounded(
+      a, _mm_sub_ps(truncated, _mm_and_ps(_mm_cmpgt_ps(truncated, a), one)));
+}
+
+__forceinline __m128 sse2_ceil_ps(const __m128 a)
+{
+  const __m128 truncated = _mm_cvtepi32_ps(_mm_cvttps_epi32(a));
+  const __m128 one = _mm_set1_ps(1.0f);
+  return sse2_select_rounded(
+      a, _mm_add_ps(truncated, _mm_and_ps(_mm_cmplt_ps(truncated, a), one)));
+}
+#  endif
 
 #endif
 #if (defined(__aarch64__) || defined(_M_ARM64)) && !defined(_MM_SET_FLUSH_ZERO_MODE)

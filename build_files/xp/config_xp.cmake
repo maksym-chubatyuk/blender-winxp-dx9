@@ -31,12 +31,23 @@ set(WITH_VULKAN_BACKEND OFF CACHE BOOL "" FORCE)
 set(WITH_XR_OPENXR OFF CACHE BOOL "" FORCE)
 set(WITH_INPUT_NDOF OFF CACHE BOOL "" FORCE)
 
-# Renderers: no Cycles, EEVEE needs far more than SM2.0.
-set(WITH_CYCLES OFF CACHE BOOL "" FORCE)
+# Renderers: Cycles on the CPU with an SSE2 kernel (Pentium 4), EEVEE needs far more than SM2.0.
+# Embree, OSL (LLVM), path guiding (OpenPGL) and denoising (OpenImageDenoise) need 64-bit or
+# SSE4, Cycles uses its own BVH.
+set(WITH_CYCLES ON CACHE BOOL "" FORCE)
+set(WITH_CYCLES_KERNEL_SSE2 ON CACHE BOOL "" FORCE)
+set(WITH_CYCLES_EMBREE OFF CACHE BOOL "" FORCE)
+set(WITH_CYCLES_OSL OFF CACHE BOOL "" FORCE)
+set(WITH_CYCLES_PATH_GUIDING OFF CACHE BOOL "" FORCE)
+set(WITH_CYCLES_DEVICE_CUDA OFF CACHE BOOL "" FORCE)
+set(WITH_CYCLES_DEVICE_OPTIX OFF CACHE BOOL "" FORCE)
+set(WITH_CYCLES_DEVICE_HIP OFF CACHE BOOL "" FORCE)
+set(WITH_CYCLES_DEVICE_HIPRT OFF CACHE BOOL "" FORCE)
+set(WITH_CYCLES_DEVICE_ONEAPI OFF CACHE BOOL "" FORCE)
 set(WITH_HYDRA OFF CACHE BOOL "" FORCE)
 set(WITH_FREESTYLE OFF CACHE BOOL "" FORCE)
 
-# Single core: TBB buys nothing and its runtime needs Vista+.
+# TBB's runtime needs Vista+. Cycles uses a small thread pool of its own instead.
 set(WITH_TBB OFF CACHE BOOL "" FORCE)
 
 # Libraries not built for XP (yet).

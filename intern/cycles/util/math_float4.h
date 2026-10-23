@@ -506,8 +506,10 @@ ccl_device_inline float4 floor(const float4 a)
 #  ifdef __KERNEL_SSE__
 #    if defined(__KERNEL_NEON__)
   return float4(vrndmq_f32(a));
-#    else
+#    elif defined(__KERNEL_SSE42__)
   return float4(_mm_floor_ps(a));
+#    else
+  return float4(sse2_floor_ps(a));
 #    endif
 #  else
   return make_float4(floorf(a.x), floorf(a.y), floorf(a.z), floorf(a.w));

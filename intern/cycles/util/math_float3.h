@@ -423,8 +423,10 @@ ccl_device_inline float3 round(const float3 a)
 {
 #  if defined(__KERNEL_NEON__)
   return float3(vrndnq_f32(a.m128));
-#  elif defined(__KERNEL_SSE__)
+#  elif defined(__KERNEL_SSE42__)
   return float3(_mm_round_ps(a.m128, _MM_FROUND_NINT));
+#  elif defined(__KERNEL_SSE__)
+  return float3(sse2_round_ps(a.m128));
 #  else
   return make_float3(roundf(a.x), roundf(a.y), roundf(a.z));
 #  endif
@@ -432,8 +434,10 @@ ccl_device_inline float3 round(const float3 a)
 
 ccl_device_inline float3 floor(const float3 a)
 {
-#  ifdef __KERNEL_SSE__
+#  if defined(__KERNEL_SSE42__)
   return float3(_mm_floor_ps(a));
+#  elif defined(__KERNEL_SSE__)
+  return float3(sse2_floor_ps(a.m128));
 #  else
   return make_float3(floorf(a.x), floorf(a.y), floorf(a.z));
 #  endif
@@ -441,8 +445,10 @@ ccl_device_inline float3 floor(const float3 a)
 
 ccl_device_inline float3 ceil(const float3 a)
 {
-#  ifdef __KERNEL_SSE__
+#  if defined(__KERNEL_SSE42__)
   return float3(_mm_ceil_ps(a));
+#  elif defined(__KERNEL_SSE__)
+  return float3(sse2_ceil_ps(a.m128));
 #  else
   return make_float3(ceilf(a.x), ceilf(a.y), ceilf(a.z));
 #  endif

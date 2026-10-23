@@ -424,6 +424,10 @@ void PathTrace::path_trace(RenderWork &render_work)
 
   const int num_works = path_trace_works_.size();
 
+#if !defined(WITH_EMBREE) && (defined(__i386__) || defined(_M_IX86))
+  /* Like Embree builds do (see `BVHEmbree`): denormals are very slow on old CPUs. */
+  SIMD_SET_FLUSH_TO_ZERO;
+#endif
   thread_capture_fp_settings();
 
   parallel_for(0, num_works, [&](int i) {

@@ -11,7 +11,7 @@
 
 #ifdef _WIN32
 #  include <cstdio>
-#  if (!defined(FREE_WINDOWS))
+#  if !defined(FREE_WINDOWS) && !defined(__MINGW32__)
 #    include <intrin.h>
 #  endif
 #  include "util/windows.h"
@@ -51,7 +51,8 @@ int system_console_width()
 }
 
 /* Equivalent of Windows __cpuid for x86 processors on other platforms. */
-#if (!defined(_WIN32) || defined(FREE_WINDOWS)) && (defined(__x86_64__) || defined(__i386__))
+#if (!defined(_WIN32) || defined(FREE_WINDOWS) || defined(__MINGW32__)) && \
+    (defined(__x86_64__) || defined(__i386__))
 static void __cpuid(int data[4], int selector)
 {
 #  if defined(__x86_64__)

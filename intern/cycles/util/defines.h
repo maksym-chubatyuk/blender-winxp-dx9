@@ -27,8 +27,8 @@
 #  define ccl_device_noinline static inline
 #  define ccl_device_noinline_cpu ccl_device_noinline
 
-/* Forced inlining. */
-#  if defined(_WIN32) && !defined(FREE_WINDOWS)
+/* Forced inlining. MinGW is GCC, it has a C++ `__forceinline` and no `__declspec(align)`. */
+#  if defined(_WIN32) && !defined(FREE_WINDOWS) && !defined(__MINGW32__)
 #    define ccl_device_inline static __forceinline
 #    define ccl_device_forceinline static __forceinline
 #    define ccl_device_inline_method __forceinline
@@ -50,7 +50,7 @@
 #    define ccl_device_inline_method __attribute__((always_inline))
 #    define ccl_device_template_spec template<> inline __attribute__((always_inline))
 #    define ccl_align(...) __attribute__((aligned(__VA_ARGS__)))
-#    ifndef FREE_WINDOWS64
+#    if !defined(FREE_WINDOWS64) && !defined(__MINGW32__)
 #      define __forceinline inline __attribute__((always_inline))
 #    endif
 #    define ccl_try_align(...) __attribute__((aligned(__VA_ARGS__)))

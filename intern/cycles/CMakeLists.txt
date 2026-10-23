@@ -73,6 +73,15 @@ elseif(SUPPORTS_NEON_BUILD AND SSE2NEON_FOUND)
   set(CXX_HAS_SSE42 FALSE)
   set(CXX_HAS_AVX2 FALSE)
   set(CXX_HAS_F16C FALSE)
+elseif(CMAKE_SIZEOF_VOID_P EQUAL 4 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86|i[3-6]86)$")
+  # 32-bit x86 (the Windows XP port, Pentium 4): only the regular kernel, using SSE2 when the
+  # compiler targets it (see `util/optimization.h`). No SSE4.2 or AVX2 flags.
+  set(CXX_HAS_SSE42 FALSE)
+  set(CXX_HAS_AVX2 FALSE)
+  set(CXX_HAS_F16C FALSE)
+  if(WITH_CYCLES_KERNEL_SSE2)
+    add_definitions(-DWITH_KERNEL_SSE2)
+  endif()
 elseif(WIN32 AND MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   set(CXX_HAS_SSE42 TRUE)
   set(CXX_HAS_AVX2 TRUE)
@@ -208,6 +217,10 @@ add_definitions(
   -DCCL_NAMESPACE_BEGIN=namespace\ ccl\ {
   -DCCL_NAMESPACE_END=}
 )
+
+if(NOT WITH_TBB)
+  add_definitions(-DWITH_CYCLES_TBB_COMPAT)
+endif()
 
 if(WITH_CYCLES_DEBUG)
   add_definitions(-DWITH_CYCLES_DEBUG)
