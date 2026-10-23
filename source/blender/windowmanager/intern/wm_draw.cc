@@ -1057,6 +1057,9 @@ static void wm_draw_area_offscreen(bContext *C, wmWindow *win, ScrArea *area, bo
                                                                  1.0f;
         GPU_viewport_render_scale_set(region.runtime->draw_buffer->viewport,
                                       is_view3d ? scale : 1.0f);
+        /* Images and render results are drawn without blending: keep their precision. */
+        GPU_viewport_float_color_set(region.runtime->draw_buffer->viewport,
+                                     area->spacetype == SPACE_IMAGE);
       }
       wm_draw_region_bind(&region, 0);
       ED_region_do_draw(C, &region);

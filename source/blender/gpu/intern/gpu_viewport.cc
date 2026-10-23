@@ -108,6 +108,8 @@ struct GPUViewport {
 enum {
   DO_UPDATE = (1 << 0),
   GPU_VIEWPORT_STEREO = (1 << 1),
+  /** The render color is a float texture without float blending, see #viewport_color_format. */
+  GPU_VIEWPORT_FLOAT_COLOR = (1 << 2),
 };
 
 void GPU_viewport_tag_update(GPUViewport *viewport)
@@ -143,11 +145,15 @@ DRWData **GPU_viewport_data_get(GPUViewport *viewport)
   return &viewport->draw_data;
 }
 
-/** The render color is blended into: an 8 bit format on hardware without float blending. */
-static gpu::TextureFormat viewport_color_format()
+/**
+ * The render color is blended into: an 8 bit format on hardware without float blending, unless
+ * nothing blends into it (images, where linear 8 bit values band in the dark tones).
+ */
+static gpu::TextureFormat viewport_color_format(const GPUViewport *viewport)
 {
-  return GPU_float_blending_support() ? gpu::TextureFormat::SFLOAT_16_16_16_16 :
-                                        gpu::TextureFormat::UNORM_8_8_8_8;
+  return GPU_float_blending_support() || (viewport->flag & GPU_VIEWPORT_FLOAT_COLOR) ?
+             gpu::TextureFormat::SFLOAT_16_16_16_16 :
+             gpu::TextureFormat::UNORM_8_8_8_8;
 }
 
 static void gpu_viewport_textures_create(GPUViewport *viewport)
@@ -163,7 +169,7 @@ static void gpu_viewport_textures_create(GPUViewport *viewport)
     viewport->color_render_tx[0] = GPU_texture_create_2d("dtxl_color",
                                                          UNPACK2(size),
                                                          1,
-                                                         viewport_color_format(),
+                                                         viewport_color_format(viewport),
                                                          usage | GPU_TEXTURE_USAGE_SHADER_WRITE,
                                                          nullptr);
     viewport->color_overlay_tx[0] = GPU_texture_create_2d(
@@ -177,7 +183,7 @@ static void gpu_viewport_textures_create(GPUViewport *viewport)
     viewport->color_render_tx[1] = GPU_texture_create_2d("dtxl_color_stereo",
                                                          UNPACK2(size),
                                                          1,
-                                                         viewport_color_format(),
+                                                         viewport_color_format(viewport),
                                                          usage | GPU_TEXTURE_USAGE_SHADER_WRITE,
                                                          nullptr);
     viewport->color_overlay_tx[1] = GPU_texture_create_2d("dtxl_color_overlay_stereo",
@@ -211,7 +217,7 @@ static void gpu_viewport_textures_create(GPUViewport *viewport)
     viewport->display_color_tx = GPU_texture_create_2d("viewport_display_color",
                                                        UNPACK2(display_size),
                                                        1,
-                                                       viewport_color_format(),
+                                                       viewport_color_format(viewport),
                                                        usage,
                                                        nullptr);
     viewport->display_overlay_tx = GPU_texture_create_2d("viewport_display_overlay",
@@ -257,6 +263,18 @@ void GPU_viewport_render_scale_set(GPUViewport *viewport, float scale)
   /* Stereo viewports aren't supported. */
   viewport->render_scale = (viewport->flag & GPU_VIEWPORT_STEREO) ? 1.0f :
                                                                     clamp_f(scale, 0.1f, 1.0f);
+}
+
+void GPU_viewport_float_color_set(GPUViewport *viewport, bool float_color)
+{
+  if (bool(viewport->flag & GPU_VIEWPORT_FLOAT_COLOR) == float_color) {
+    return;
+  }
+  SET_FLAG_FROM_TEST(viewport->flag, float_color, GPU_VIEWPORT_FLOAT_COLOR);
+  if (!GPU_float_blending_support()) {
+    /* Recreate the textures on the next bind. */
+    viewport->size = int2(-1);
+  }
 }
 
 void GPU_viewport_bind(GPUViewport *viewport, int view, const rcti *rect)

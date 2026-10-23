@@ -32,6 +32,11 @@ GPUViewport *GPU_viewport_stereo_create();
  * #GPU_viewport_render_upscale. Not supported by stereo viewports.
  */
 void GPU_viewport_render_scale_set(GPUViewport *viewport, float scale);
+/**
+ * Keep a float render color on hardware without float blending (#GPU_float_blending_support),
+ * for viewports whose engines don't blend into it (the image editor).
+ */
+void GPU_viewport_float_color_set(GPUViewport *viewport, bool float_color);
 void GPU_viewport_bind(GPUViewport *viewport, int view, const rcti *rect);
 void GPU_viewport_unbind(GPUViewport *viewport);
 /**
