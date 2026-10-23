@@ -558,12 +558,12 @@ bool D3D9Texture::ensure_resource(bool render_target)
       }
     }
   }
-  /* `BLENDER_D3D9_EMULATE_R300`: fail like the Radeon 9x00 driver does for managed float textures
-   * of non power of two sizes, to reproduce its code paths elsewhere. */
+  /* `BLENDER_D3D9_EMULATE_R300`: fail like the Radeon 9x00 driver does for float volume textures
+   * of non power of two sizes (2D ones work), to reproduce its code paths elsewhere. */
   static const bool emulate_r300 = getenv("BLENDER_D3D9_EMULATE_R300") != nullptr;
-  if (emulate_r300 && SUCCEEDED(hr) && !render_target && !from_cache &&
+  if (emulate_r300 && SUCCEEDED(hr) && volume_ &&
       ELEM(device_format_.kind, D3D9TexelKind::HALF, D3D9TexelKind::FLOAT) &&
-      !(is_power_of_2_i(device_w_) && is_power_of_2_i(device_h_)))
+      !(is_power_of_2_i(device_w_) && is_power_of_2_i(device_h_) && is_power_of_2_i(device_d_)))
   {
     d3d9_release(tex2d_);
     d3d9_release(cube_);
