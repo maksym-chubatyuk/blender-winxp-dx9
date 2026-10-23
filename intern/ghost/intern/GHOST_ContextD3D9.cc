@@ -143,6 +143,12 @@ bool GHOST_ContextD3D9::swap_chain_create(int width, int height)
                                              D3DPRESENT_INTERVAL_IMMEDIATE;
 
   HRESULT hr = g_device->CreateAdditionalSwapChain(&pp, &swap_chain_);
+  if (hr == D3DERR_OUTOFVIDEOMEMORY) {
+    /* Back buffers need video memory, which managed textures may fill (128 MB cards): move them
+     * out (the driver reloads them when used) and try again. */
+    g_device->EvictManagedResources();
+    hr = g_device->CreateAdditionalSwapChain(&pp, &swap_chain_);
+  }
   if (FAILED(hr)) {
     fprintf(stderr,
             "GHOST: CreateAdditionalSwapChain %dx%d failed (0x%08lx).\n",

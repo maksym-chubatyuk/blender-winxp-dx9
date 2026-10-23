@@ -108,3 +108,7 @@ overlay_paint_wire                             overlay_paint.hlsl WIRE
 overlay_paint_point                            overlay_paint.hlsl POINT
 overlay_motion_path_line                       overlay_motion_path.hlsl LINE
 overlay_motion_path_point                      overlay_motion_path.hlsl POINT
+
+image_engine_image_shader                      image_engine_image.hlsl
+overlay_grid_background                        overlay_grid_background.hlsl
+overlay_grid_image                             overlay_grid_background.hlsl IMAGE
