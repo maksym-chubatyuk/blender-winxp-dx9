@@ -267,10 +267,12 @@ void D3D9Context::end_frame()
       if (d3d9_gpu_time_enabled()) {
         gpu_times_print(frames);
       }
-      printf("d3d9: %.1f textures created, %.1f freed per frame, %u MB texture memory available\n",
+      printf("d3d9: %.1f textures created, %.1f freed per frame, %u MB texture memory available, "
+             "%.1f MB of render targets\n",
              float(d3d9_frame_stats.textures_created) / frames,
              float(d3d9_frame_stats.textures_freed) / frames,
-             device->GetAvailableTextureMem() / (1024 * 1024));
+             device->GetAvailableTextureMem() / (1024 * 1024),
+             double(d3d9_render_target_bytes()) / (1024.0 * 1024.0));
       fflush(stdout);
       cpu_sum = 0.0;
       frames = 0;

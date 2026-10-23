@@ -348,11 +348,33 @@ D3D9Texture::~D3D9Texture()
   free_resource();
 }
 
+/** Bytes of render targets and depth surfaces (video memory), for the budget emulation. */
+static int64_t d3d9_vram_bytes = 0;
+
+int64_t d3d9_render_target_bytes()
+{
+  return d3d9_vram_bytes;
+}
+
+/**
+ * `BLENDER_D3D9_EMULATE_VRAM_MB=<n>`: render targets and depth surfaces beyond n MB fail to be
+ * created (out of video memory), like on 128 MB cards with big windows.
+ */
+static bool d3d9_vram_budget_exceeded(int64_t bytes)
+{
+  static const int64_t budget = getenv("BLENDER_D3D9_EMULATE_VRAM_MB") ?
+                                    int64_t(atoi(getenv("BLENDER_D3D9_EMULATE_VRAM_MB"))) << 20 :
+                                    0;
+  return budget > 0 && d3d9_vram_bytes + bytes > budget;
+}
+
 void D3D9Texture::free_resource()
 {
   if (tex2d_ || cube_ || volume_ || depth_surface_) {
     d3d9_frame_stats.textures_freed++;
   }
+  d3d9_vram_bytes -= vram_bytes_;
+  vram_bytes_ = 0;
   if (tex2d_ && !is_render_target_ && source_ == nullptr) {
     D3D9Backend::get()->texture_cache_put(tex2d_);
     tex2d_ = nullptr;
@@ -454,6 +476,11 @@ bool D3D9Texture::ensure_resource(bool render_target)
 
   if (device_format_.kind == D3D9TexelKind::DEPTH) {
     if (depth_surface_ == nullptr) {
+      const int64_t bytes = int64_t(device_w_) * device_h_ * 4;
+      if (d3d9_vram_budget_exceeded(bytes)) {
+        CLOG_ERROR(&LOG, "Depth surface \"%s\": out of video memory (emulated)", name_.c_str());
+        return false;
+      }
       D3D9_CHECK(device->CreateDepthStencilSurface(device_w_,
                                                    device_h_,
                                                    device_format_.format,
@@ -462,6 +489,10 @@ bool D3D9Texture::ensure_resource(bool render_target)
                                                    FALSE,
                                                    &depth_surface_,
                                                    nullptr));
+      if (depth_surface_) {
+        vram_bytes_ = bytes;
+        d3d9_vram_bytes += bytes;
+      }
       is_render_target_ = true;
     }
     return depth_surface_ != nullptr;
@@ -507,15 +538,25 @@ bool D3D9Texture::ensure_resource(bool render_target)
                              backend->texture_cache_take(
                                  device_w_, device_h_, device_levels_, device_format_.format);
     from_cache = tex2d_ != nullptr;
-    hr = tex2d_ ? D3D_OK :
-                  device->CreateTexture(device_w_,
-                                        device_h_,
-                                        device_levels_,
-                                        usage,
-                                        device_format_.format,
-                                        pool,
-                                        &tex2d_,
-                                        nullptr);
+    const int64_t bytes = int64_t(device_w_) * device_h_ * d3d9_texel_size(device_format_);
+    if (render_target && d3d9_vram_budget_exceeded(bytes)) {
+      hr = D3DERR_OUTOFVIDEOMEMORY;
+    }
+    else {
+      hr = tex2d_ ? D3D_OK :
+                    device->CreateTexture(device_w_,
+                                          device_h_,
+                                          device_levels_,
+                                          usage,
+                                          device_format_.format,
+                                          pool,
+                                          &tex2d_,
+                                          nullptr);
+      if (SUCCEEDED(hr) && render_target) {
+        vram_bytes_ = bytes;
+        d3d9_vram_bytes += bytes;
+      }
+    }
   }
   /* `BLENDER_D3D9_EMULATE_R300`: fail like the Radeon 9x00 driver does for managed float textures
    * of non power of two sizes, to reproduce its code paths elsewhere. */

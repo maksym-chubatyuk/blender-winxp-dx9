@@ -145,6 +145,8 @@ class D3D9Texture : public Texture {
   bool filterable_ = true;
   /** The device refused to create the texture: don't try again on every use. */
   bool creation_failed_ = false;
+  /** Video memory of the render target or depth surface. */
+  int64_t vram_bytes_ = 0;
   /** Texture views share the resource of their source. */
   D3D9Texture *source_ = nullptr;
   int view_mip_offset_ = 0;

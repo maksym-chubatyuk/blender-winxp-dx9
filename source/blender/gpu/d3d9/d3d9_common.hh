@@ -72,6 +72,9 @@ struct D3D9HeapCheckScope {
 #define D3D9_HEAP_CHECK_SCOPE_DRAW(where) \
   const D3D9HeapCheckScope d3d9_heap_check_scope_{where, 2}
 
+/** Bytes of render targets and depth surfaces currently allocated (video memory). */
+int64_t d3d9_render_target_bytes();
+
 /** Report a failed D3D call (once per call site), returns true on success. */
 bool d3d9_check(HRESULT hr, const char *call, const char *file, int line);
 #define D3D9_CHECK(call) blender::gpu::d3d9_check((call), #call, __FILE__, __LINE__)
