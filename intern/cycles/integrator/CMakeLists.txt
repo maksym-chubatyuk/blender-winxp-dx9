@@ -12,6 +12,7 @@ set(INC_SYS
 set(SRC
   adaptive_sampling.cpp
   denoiser.cpp
+  denoiser_nlm.cpp
   denoiser_gpu.cpp
   denoiser_oidn.cpp
   denoiser_oidn_base.cpp
@@ -36,6 +37,14 @@ set(SRC
 set(SRC_HEADERS
   adaptive_sampling.h
   denoiser.h
+  denoiser_nlm.h
+  nlm/defines.h
+  nlm/features.h
+  nlm/math_matrix.h
+  nlm/nlm_cpu.h
+  nlm/prefilter.h
+  nlm/reconstruction.h
+  nlm/transform.h
   denoiser_gpu.h
   denoiser_oidn.h
   denoiser_oidn_base.h

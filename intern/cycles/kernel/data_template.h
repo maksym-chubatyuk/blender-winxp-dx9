@@ -152,8 +152,8 @@ KERNEL_STRUCT_MEMBER(film, int, use_approximate_shadow_catcher)
 KERNEL_STRUCT_MEMBER(film, int, pass_guiding_color)
 KERNEL_STRUCT_MEMBER(film, int, pass_guiding_probability)
 KERNEL_STRUCT_MEMBER(film, int, pass_guiding_avg_roughness)
-/* Padding. */
-KERNEL_STRUCT_MEMBER(film, int, pad1)
+/* NLM denoiser data (in place of padding). */
+KERNEL_STRUCT_MEMBER(film, int, pass_denoising_nlm)
 KERNEL_STRUCT_END(KernelFilm)
 
 /* Integrator. */

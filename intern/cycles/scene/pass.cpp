@@ -92,6 +92,7 @@ const NodeEnum *Pass::get_type_enum()
     pass_type_enum.insert("denoising_normal", PASS_DENOISING_NORMAL);
     pass_type_enum.insert("denoising_roughness", PASS_DENOISING_ROUGHNESS);
     pass_type_enum.insert("denoising_depth", PASS_DENOISING_DEPTH);
+    pass_type_enum.insert("denoising_nlm", PASS_DENOISING_NLM);
     pass_type_enum.insert("denoising_backward_motion", PASS_DENOISING_BACKWARD_MOTION);
     pass_type_enum.insert("denoising_previous", PASS_DENOISING_PREVIOUS);
     pass_type_enum.insert("volume_majorant", PASS_VOLUME_MAJORANT);
@@ -318,6 +319,10 @@ PassInfo Pass::get_info(const PassType type,
     case PASS_DENOISING_ROUGHNESS:
     case PASS_DENOISING_DEPTH:
       pass_info.num_components = 1;
+      break;
+    case PASS_DENOISING_NLM:
+      pass_info.num_components = DENOISING_NLM_PASS_SIZE;
+      pass_info.use_filter = false;
       break;
     case PASS_DENOISING_PREVIOUS:
       pass_info.num_components = 3;

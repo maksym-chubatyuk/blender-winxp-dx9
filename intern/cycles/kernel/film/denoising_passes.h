@@ -56,6 +56,16 @@ ccl_device_forceinline void film_write_denoising_features_surface(KernelGlobals 
 
   ccl_global float *buffer = film_pass_pixel_render_buffer(kg, state, render_buffer);
 
+  if (kernel_data.film.pass_denoising_nlm != PASS_UNUSED &&
+      INTEGRATOR_STATE(state, path, bounce) == 0 &&
+      INTEGRATOR_STATE(state, path, transparent_bounce) == 0)
+  {
+    /* Distance to the first hit, the background has none. The square is added per sample. */
+    film_write_pass_float(
+        buffer + kernel_data.film.pass_denoising_nlm + DENOISING_NLM_DEPTH,
+        ensure_finite(sd->ray_length - INTEGRATOR_STATE(state, ray, tmin)));
+  }
+
   float3 normal = zero_float3();
   Spectrum diffuse_albedo = zero_spectrum();
   Spectrum specular_albedo = zero_spectrum();

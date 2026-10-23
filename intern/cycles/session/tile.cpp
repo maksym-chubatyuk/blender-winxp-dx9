@@ -61,7 +61,9 @@ static std::vector<std::string> exr_channel_names_for_passes(const BufferParams 
     const string channel_name_prefix = prefix + string(pass.name) + ".";
 
     for (int i = 0; i < pass_info.num_components; ++i) {
-      channel_names.push_back(channel_name_prefix + component_suffixes[i]);
+      /* Data passes can have more components (the NLM denoiser's). */
+      channel_names.push_back(channel_name_prefix +
+                              (i < 4 ? string(component_suffixes[i]) : std::to_string(i)));
     }
 
     ++pass_index;

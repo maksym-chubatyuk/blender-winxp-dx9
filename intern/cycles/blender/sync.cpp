@@ -36,6 +36,7 @@
 #include "blender/util.h"
 
 #include "integrator/denoiser.h"
+#include "util/openimagedenoise.h"
 
 #include "util/debug.h"
 
@@ -1205,6 +1206,12 @@ DenoiseParams BlenderSync::get_denoise_params(blender::Scene &b_scene,
         denoising.use = false;
       }
     }
+  }
+
+  /* Builds without OpenImageDenoise (the 32-bit XP port) denoise with NLM, also files set to
+   * OpenImageDenoise. */
+  if (denoising.type == DENOISER_OPENIMAGEDENOISE && !openimagedenoise_supported()) {
+    denoising.type = DENOISER_NLM;
   }
 
   switch (input_passes) {

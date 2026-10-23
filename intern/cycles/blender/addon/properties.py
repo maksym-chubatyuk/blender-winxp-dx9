@@ -273,7 +273,10 @@ def enum_openimagedenoise_denoiser(self, context):
     if _cycles.with_openimagedenoise:
         return [('OPENIMAGEDENOISE', "OpenImageDenoise",
                  n_("Use Intel OpenImageDenoise AI denoiser"), 4)]
-    return []
+    # Builds without OpenImageDenoise (32-bit Windows XP) denoise with NLM in its place, files keep
+    # OpenImageDenoise for other builds.
+    return [('NLM', "NLM",
+             n_("Use Cycles' non-local means denoiser, on the CPU"), 4)]
 
 
 def enum_optix_denoiser(self, context):

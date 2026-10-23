@@ -116,6 +116,42 @@ void PathTraceWorkCPU::render_samples(RenderStatistics &statistics,
   statistics.occupancy = 1.0f;
 }
 
+/* The NLM denoiser estimates the variance of the color and of its guiding passes from the sums of
+ * their squares per sample (#PASS_DENOISING_NLM). The path tracer adds to the passes of a pixel
+ * from many places, but on the CPU the samples of a pixel are rendered one after the other: how
+ * much the passes changed during a sample is that sample's value. */
+struct DenoisingNLMSample {
+  float values[10];
+
+  static void read(const KernelFilm &film, const float *pixel, float values[10])
+  {
+    for (int i = 0; i < 3; i++) {
+      values[i] = pixel[film.pass_combined + i];
+      values[3 + i] = pixel[film.pass_denoising_normal + i];
+      values[6 + i] = pixel[film.pass_denoising_albedo + i];
+    }
+    values[9] = pixel[film.pass_denoising_nlm + DENOISING_NLM_DEPTH];
+  }
+
+  void begin(const KernelFilm &film, const float *pixel)
+  {
+    read(film, pixel, values);
+  }
+
+  void end(const KernelFilm &film, float *pixel) const
+  {
+    float after[10];
+    read(film, pixel, after);
+    float *squares = pixel + film.pass_denoising_nlm;
+    for (int i = 0; i < 3; i++) {
+      squares[DENOISING_NLM_COLOR_SQUARED + i] += sqr(after[i] - values[i]);
+      squares[DENOISING_NLM_NORMAL_SQUARED + i] += sqr(after[3 + i] - values[3 + i]);
+      squares[DENOISING_NLM_ALBEDO_SQUARED + i] += sqr(after[6 + i] - values[6 + i]);
+    }
+    squares[DENOISING_NLM_DEPTH_SQUARED] += sqr(after[9] - values[9]);
+  }
+};
+
 void PathTraceWorkCPU::render_samples_full_pipeline(ThreadKernelGlobalsCPU *kernel_globals,
                                                     const KernelWorkTile &work_tile,
                                                     const int samples_num)
@@ -134,6 +170,11 @@ void PathTraceWorkCPU::render_samples_full_pipeline(ThreadKernelGlobalsCPU *kern
 
   KernelWorkTile sample_work_tile = work_tile;
   float *render_buffer = buffers_->buffer.data();
+
+  const KernelFilm &film = kernel_globals->data.film;
+  const bool use_denoising_nlm = film.pass_denoising_nlm != PASS_UNUSED &&
+                                 film.pass_denoising_normal != PASS_UNUSED &&
+                                 film.pass_denoising_albedo != PASS_UNUSED;
 
   fast_timer render_timer;
 
@@ -155,6 +196,13 @@ void PathTraceWorkCPU::render_samples_full_pipeline(ThreadKernelGlobalsCPU *kern
       {
         break;
       }
+    }
+
+    DenoisingNLMSample nlm_sample;
+    float *nlm_pixel = nullptr;
+    if (use_denoising_nlm) {
+      nlm_pixel = render_buffer + uint64_t(state->path.render_pixel_index) * film.pass_stride;
+      nlm_sample.begin(film, nlm_pixel);
     }
 
 #if defined(WITH_PATH_GUIDING)
@@ -181,6 +229,10 @@ void PathTraceWorkCPU::render_samples_full_pipeline(ThreadKernelGlobalsCPU *kern
       if (shadow_catcher_state) {
         kernels_.integrator_megakernel(kernel_globals, shadow_catcher_state, render_buffer);
       }
+    }
+
+    if (nlm_pixel) {
+      nlm_sample.end(film, nlm_pixel);
     }
 
     if (kernel_globals->data.film.pass_render_time != PASS_UNUSED) {

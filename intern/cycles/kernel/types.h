@@ -428,6 +428,8 @@ enum PassType {
   PASS_DENOISING_ROUGHNESS,
   PASS_DENOISING_DEPTH,
   PASS_DENOISING_BACKWARD_MOTION,
+  /* Data of the NLM denoiser, see #DenoisingNLMPassOffset. */
+  PASS_DENOISING_NLM,
   PASS_CATEGORY_DENOISING_END = 95,
 
   PASS_BAKE_PRIMITIVE,
@@ -441,6 +443,19 @@ enum PassType {
 };
 
 #define PASS_ANY (~0)  // NOLINT
+
+/* Floats of #PASS_DENOISING_NLM, sums over the samples: the per sample variance of the color and
+ * the guiding passes is estimated from the sums of squares. The depth is the distance to the first
+ * hit (zero for the background). The CPU path tracer adds the squares, see
+ * `PathTraceWorkCPU::render_samples_full_pipeline`. */
+enum DenoisingNLMPassOffset {
+  DENOISING_NLM_COLOR_SQUARED = 0,
+  DENOISING_NLM_NORMAL_SQUARED = 3,
+  DENOISING_NLM_ALBEDO_SQUARED = 6,
+  DENOISING_NLM_DEPTH = 9,
+  DENOISING_NLM_DEPTH_SQUARED = 10,
+  DENOISING_NLM_PASS_SIZE = 11,
+};
 
 enum CryptomatteType {
   CRYPT_NONE = 0,

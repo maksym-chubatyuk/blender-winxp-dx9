@@ -6,6 +6,7 @@
 
 #include "device/device.h"
 
+#include "integrator/denoiser_nlm.h"
 #include "integrator/denoiser_oidn.h"
 #include "session/display_driver.h"
 #ifdef WITH_OPENIMAGEDENOISE
@@ -138,6 +139,14 @@ DenoiseParams get_effective_denoise_params(Device *denoiser_device,
     }
   }
 
+  /* NLM runs on the CPU, it's also used when OIDN is not available (32-bit XP port). */
+  if (effective_denoise_params.type == DENOISER_NLM || !openimagedenoise_supported()) {
+    effective_denoise_params.type = DENOISER_NLM;
+    effective_denoise_params.use_gpu = false;
+    effective_denoise_params.upscale_factor = 1.0f;
+    return effective_denoise_params;
+  }
+
   /* Always fallback to OIDN on CPU. */
   effective_denoise_params.type = DENOISER_OPENIMAGEDENOISE;
   effective_denoise_params.use_gpu = false;
@@ -170,6 +179,12 @@ unique_ptr<Denoiser> Denoiser::create(Device *denoiser_device,
       return make_unique<OIDNDenoiserGPU>(single_denoiser_device, effective_denoiser_params);
     }
 #endif
+  }
+
+  if (effective_denoiser_params.type == DENOISER_NLM) {
+    return make_unique<NLMDenoiser>(
+        is_cpu_denoiser_device ? single_denoiser_device : cpu_fallback_device,
+        effective_denoiser_params);
   }
 
   if (!openimagedenoise_supported()) {
@@ -205,6 +220,10 @@ DenoiserType Denoiser::automatic_viewport_denoiser_type(const DeviceInfo &denois
     return DENOISER_OPENIMAGEDENOISE;
   }
 #endif
+
+  if (denoise_device_info.type == DEVICE_CPU) {
+    return DENOISER_NLM;
+  }
 
   return DENOISER_NONE;
 }

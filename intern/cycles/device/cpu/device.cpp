@@ -42,6 +42,7 @@ void device_cpu_info(vector<DeviceInfo> &devices)
   if (openimagedenoise_supported()) {
     info.denoisers |= DENOISER_OPENIMAGEDENOISE;
   }
+  info.denoisers |= DENOISER_NLM;
 
   devices.insert(devices.begin(), info);
 }

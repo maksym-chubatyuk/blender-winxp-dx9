@@ -207,6 +207,7 @@ void Film::device_update(Device *device, DeviceScene *dscene, Scene *scene)
   kfilm->pass_denoising_roughness = PASS_UNUSED;
   kfilm->pass_denoising_depth = PASS_UNUSED;
   kfilm->pass_denoising_backward_motion = PASS_UNUSED;
+  kfilm->pass_denoising_nlm = PASS_UNUSED;
   kfilm->pass_sample_count = PASS_UNUSED;
   kfilm->pass_render_time = PASS_UNUSED;
   kfilm->pass_adaptive_aux_buffer = PASS_UNUSED;
@@ -403,6 +404,9 @@ void Film::device_update(Device *device, DeviceScene *dscene, Scene *scene)
       case PASS_DENOISING_BACKWARD_MOTION:
         kfilm->pass_denoising_backward_motion = kfilm->pass_stride;
         break;
+      case PASS_DENOISING_NLM:
+        kfilm->pass_denoising_nlm = kfilm->pass_stride;
+        break;
 
       case PASS_SHADOW_CATCHER:
         kfilm->pass_shadow_catcher = kfilm->pass_stride;
@@ -590,6 +594,12 @@ void Film::update_passes(Scene *scene)
     }
     if (denoiser_passes & DENOISER_PASS_BACKWARD_MOTION) {
       add_auto_pass(scene, PASS_DENOISING_BACKWARD_MOTION);
+    }
+    if (integrator->get_denoiser_type() == DENOISER_NLM) {
+      /* NLM always uses the albedo and normal passes, and its own data. */
+      add_auto_pass(scene, PASS_DENOISING_ALBEDO);
+      add_auto_pass(scene, PASS_DENOISING_NORMAL);
+      add_auto_pass(scene, PASS_DENOISING_NLM);
     }
   }
 

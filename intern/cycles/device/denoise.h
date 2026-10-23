@@ -11,6 +11,8 @@ CCL_NAMESPACE_BEGIN
 enum DenoiserType {
   DENOISER_OPTIX = 2,
   DENOISER_OPENIMAGEDENOISE = 4,
+  /* Cycles' non-local means denoiser (CPU), for builds without OpenImageDenoise (XP port). */
+  DENOISER_NLM = 8,
   DENOISER_NUM,
 
   DENOISER_NONE = 0,
