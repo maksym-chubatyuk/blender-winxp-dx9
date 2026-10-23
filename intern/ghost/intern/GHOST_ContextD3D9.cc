@@ -213,10 +213,24 @@ GHOST_TSuccess GHOST_ContextD3D9::swapBufferRelease()
     QueryPerformanceCounter(&t0);
   }
   const HRESULT hr = swap_chain_->Present(nullptr, nullptr, nullptr, nullptr, 0);
+  if (FAILED(hr)) {
+    /* A lost device fails every Present until it is reset: report it once. */
+    static HRESULT last_error = S_OK;
+    if (hr != last_error) {
+      last_error = hr;
+      const HRESULT coop = g_device ? g_device->TestCooperativeLevel() : E_FAIL;
+      fprintf(stderr,
+              "GHOST: Direct3D 9 Present failed (0x%08lx), device state 0x%08lx.\n",
+              (unsigned long)hr,
+              (unsigned long)coop);
+      fflush(stderr);
+    }
+  }
 
   /* Allow one frame in flight: drivers queue up to 3 frames, with slow GPUs the input latency is
-   * then several frames long. Wait for the previous frame to be done on the GPU. */
-  if (g_device) {
+   * then several frames long. Wait for the previous frame to be done on the GPU, but not forever:
+   * a stalled GPU or lost device would freeze Blender. */
+  if (g_device && SUCCEEDED(hr)) {
     IDirect3DQuery9 *&query = frame_queries_[frame_query_index_];
     if (query == nullptr) {
       g_device->CreateQuery(D3DQUERYTYPE_EVENT, &query);
@@ -227,8 +241,19 @@ GHOST_TSuccess GHOST_ContextD3D9::swapBufferRelease()
     frame_query_index_ ^= 1;
     IDirect3DQuery9 *previous = frame_queries_[frame_query_index_];
     if (previous) {
-      while (previous->GetData(nullptr, 0, D3DGETDATA_FLUSH) == S_FALSE) {
+      const DWORD start = GetTickCount();
+      HRESULT done;
+      while ((done = previous->GetData(nullptr, 0, D3DGETDATA_FLUSH)) == S_FALSE) {
+        if (GetTickCount() - start > 250) {
+          fprintf(stderr, "GHOST: Direct3D 9 frame still not done after 250 ms.\n");
+          fflush(stderr);
+          break;
+        }
         Sleep(1);
+      }
+      if (FAILED(done)) {
+        fprintf(stderr, "GHOST: Direct3D 9 frame query failed (0x%08lx).\n", (unsigned long)done);
+        fflush(stderr);
       }
     }
   }

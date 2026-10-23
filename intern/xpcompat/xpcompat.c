@@ -26,6 +26,8 @@
 #include <tlhelp32.h>
 
 #include <commctrl.h>
+#include <fcntl.h>
+#include <io.h>
 #include <objbase.h>
 #include <shlobj.h>
 #include <stdio.h>
@@ -389,6 +391,68 @@ __attribute__((constructor)) static void xp_timer_resolution_init(void)
       time_begin_period(1);
     }
   }
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Log file
+ *
+ * Started from Explorer, Blender has no console: its output is lost. Write it to
+ * `blender_xp.log` next to the executable instead, unbuffered and written through to the disk so
+ * the last lines survive a system hang (display driver crashes take XP down). `XP_LOG=0` disables
+ * it, `XP_LOG=1` forces it.
+ * \{ */
+
+__attribute__((constructor)) static void xp_log_init(void)
+{
+  const char *env = getenv("XP_LOG");
+  if (env && strcmp(env, "0") == 0) {
+    return;
+  }
+  HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+  const int forced = env && strcmp(env, "1") == 0;
+  if (!forced && out != NULL && out != INVALID_HANDLE_VALUE &&
+      GetFileType(out) != FILE_TYPE_UNKNOWN)
+  {
+    return; /* A console or a pipe. */
+  }
+  char path[MAX_PATH];
+  DWORD len = GetModuleFileNameA(NULL, path, MAX_PATH);
+  while (len > 0 && path[len - 1] != '\\' && path[len - 1] != '/') {
+    len--;
+  }
+  if (len == 0 || len + sizeof("blender_xp.log") > MAX_PATH) {
+    return;
+  }
+  strcpy(path + len, "blender_xp.log");
+  HANDLE file = CreateFileA(path,
+                            GENERIC_WRITE,
+                            FILE_SHARE_READ,
+                            NULL,
+                            CREATE_ALWAYS,
+                            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH,
+                            NULL);
+  if (file == INVALID_HANDLE_VALUE) {
+    return;
+  }
+  const int fd = _open_osfhandle((intptr_t)file, _O_WRONLY | _O_TEXT);
+  if (fd < 0) {
+    CloseHandle(file);
+    return;
+  }
+  /* The streams of a GUI program have no file descriptors: give them some, then the log file. */
+  if (freopen("NUL", "w", stdout)) {
+    _dup2(fd, _fileno(stdout));
+    setvbuf(stdout, NULL, _IONBF, 0);
+  }
+  if (freopen("NUL", "w", stderr)) {
+    _dup2(fd, _fileno(stderr));
+    setvbuf(stderr, NULL, _IONBF, 0);
+  }
+  _close(fd);
+  SetStdHandle(STD_OUTPUT_HANDLE, (HANDLE)_get_osfhandle(_fileno(stdout)));
+  SetStdHandle(STD_ERROR_HANDLE, (HANDLE)_get_osfhandle(_fileno(stderr)));
 }
 
 /** \} */
