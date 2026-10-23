@@ -328,14 +328,6 @@ bool D3D9Context::draw_setup_impl()
   if (sh == nullptr || !sh->is_valid()) {
     return false;
   }
-  /* `BLENDER_D3D9_SKIP=<shader name>,...`: drop the draws of these shaders (debugging). */
-  static const char *skip = getenv("BLENDER_D3D9_SKIP");
-  if (skip) {
-    const std::string list = std::string(",") + skip + ",";
-    if (list.find("," + sh->name_get() + ",") != std::string::npos) {
-      return false;
-    }
-  }
 
   D3D9FrameBuffer *fb = static_cast<D3D9FrameBuffer *>(active_fb);
   D3D9StateManager &state = state_manager_get();
