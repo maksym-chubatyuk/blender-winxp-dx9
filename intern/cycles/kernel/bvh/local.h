@@ -51,6 +51,7 @@ ccl_device_inline
   float3 P = ray->P;
   float3 dir = bvh_clamp_direction(ray->D);
   float3 idir = bvh_inverse_direction(dir);
+  BVH_NODE_RAY_DECLARE();
   float tmin = ray->tmin;
   int object = OBJECT_NONE;
   float isect_t = ray->tmax;
@@ -67,6 +68,7 @@ ccl_device_inline
 #else
     bvh_instance_push(kg, local_object, ray, &P, &dir, &idir);
 #endif
+    BVH_NODE_RAY_UPDATE();
     object = local_object;
   }
 
@@ -84,7 +86,7 @@ ccl_device_inline
 #if BVH_FEATURE(BVH_HAIR)
                                        dir,
 #endif
-                                       idir,
+                                       BVH_NODE_RAY,
                                        tmin,
                                        isect_t,
                                        node_addr,
