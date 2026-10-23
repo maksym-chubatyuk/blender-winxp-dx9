@@ -28,6 +28,7 @@
 #    include <float.h>
 #    include <windows.h>
 #    ifdef __MINGW32__
+#      include <mmsystem.h>
 #      include <tlhelp32.h>
 #    endif
 
@@ -241,6 +242,107 @@ static DWORD WINAPI xp_thread_dump(LPVOID seconds)
   CloseHandle(snapshot);
   return 0;
 }
+
+/* XP port: a sampling profiler. With `XP_PROFILE=<delay>,<seconds>` the instruction pointers of
+ * all threads are sampled every millisecond for that many seconds after the delay, how often each
+ * address in the executable was hit is written to `%TEMP%\blender_profile.txt` ("address count",
+ * symbolize with the unstripped executable). A thread is only suspended while its context is
+ * read, nothing is allocated meanwhile. */
+static DWORD WINAPI xp_profile(LPVOID /*param*/)
+{
+  int delay = 0, seconds = 0;
+  if (sscanf(getenv("XP_PROFILE"), "%d,%d", &delay, &seconds) != 2 || seconds <= 0) {
+    return 0;
+  }
+  const IMAGE_DOS_HEADER *dos = (const IMAGE_DOS_HEADER *)GetModuleHandleA(nullptr);
+  const IMAGE_NT_HEADERS *nt = (const IMAGE_NT_HEADERS *)((const char *)dos + dos->e_lfanew);
+  const uintptr_t image_start = uintptr_t(dos);
+  const uintptr_t image_end = image_start + nt->OptionalHeader.SizeOfImage;
+
+  /* Open addressing on the address, counts of 0 are free slots. */
+  const uint32_t table_size = 1 << 20;
+  uintptr_t *addresses = (uintptr_t *)VirtualAlloc(
+      nullptr, table_size * sizeof(uintptr_t), MEM_COMMIT, PAGE_READWRITE);
+  uint32_t *counts = (uint32_t *)VirtualAlloc(
+      nullptr, table_size * sizeof(uint32_t), MEM_COMMIT, PAGE_READWRITE);
+  uint32_t outside = 0, total = 0;
+
+  Sleep(DWORD(delay) * 1000);
+  /* Preempt the threads being sampled (on one CPU they would run their whole time slice). */
+  SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+  timeBeginPeriod(1);
+  HANDLE threads[64];
+  int num_threads = 0;
+  const DWORD end = GetTickCount() + DWORD(seconds) * 1000;
+  for (int sample = 0; int(end - GetTickCount()) > 0; sample++) {
+    if (sample % 200 == 0) {
+      /* Threads come and go: list them again now and then. */
+      for (int i = 0; i < num_threads; i++) {
+        CloseHandle(threads[i]);
+      }
+      num_threads = 0;
+      const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+      THREADENTRY32 entry;
+      entry.dwSize = sizeof(entry);
+      for (BOOL found = Thread32First(snapshot, &entry); found && num_threads < 64;
+           found = Thread32Next(snapshot, &entry))
+      {
+        if (entry.th32OwnerProcessID == GetCurrentProcessId() &&
+            entry.th32ThreadID != GetCurrentThreadId())
+        {
+          const HANDLE thread = OpenThread(
+              THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, entry.th32ThreadID);
+          if (thread != nullptr) {
+            threads[num_threads++] = thread;
+          }
+        }
+      }
+      CloseHandle(snapshot);
+    }
+    for (int i = 0; i < num_threads; i++) {
+      if (SuspendThread(threads[i]) == DWORD(-1)) {
+        continue;
+      }
+      CONTEXT context = {};
+      context.ContextFlags = CONTEXT_CONTROL;
+      const bool valid = GetThreadContext(threads[i], &context);
+      ResumeThread(threads[i]);
+      if (!valid) {
+        continue;
+      }
+      const uintptr_t eip = context.Eip;
+      total++;
+      if (eip < image_start || eip >= image_end) {
+        /* Waiting in the system (most idle threads) or running in a DLL. */
+        outside++;
+        continue;
+      }
+      uint32_t slot = uint32_t(eip * 2654435761u) & (table_size - 1);
+      while (counts[slot] != 0 && addresses[slot] != eip) {
+        slot = (slot + 1) & (table_size - 1);
+      }
+      addresses[slot] = eip;
+      counts[slot]++;
+    }
+    Sleep(1);
+  }
+  timeEndPeriod(1);
+
+  char filepath[MAX_PATH];
+  GetTempPathA(MAX_PATH, filepath);
+  strncat(filepath, "blender_profile.txt", MAX_PATH - strlen(filepath) - 1);
+  if (FILE *file = fopen(filepath, "w")) {
+    fprintf(file, "# samples %u, outside the executable %u\n", total, outside);
+    for (uint32_t slot = 0; slot < table_size; slot++) {
+      if (counts[slot] != 0) {
+        fprintf(file, "%08lx %u\n", (unsigned long)addresses[slot], counts[slot]);
+      }
+    }
+    fclose(file);
+    fprintf(stderr, "XP_PROFILE: %u samples written to %s\n", total, filepath);
+  }
+  return 0;
+}
 #    endif
 
 extern LONG WINAPI windows_exception_handler(EXCEPTION_POINTERS *ExceptionInfo)
@@ -348,6 +450,9 @@ void main_signal_setup()
 #  if defined(WIN32) && defined(__MINGW32__)
   if (const char *seconds = getenv("XP_THREAD_DUMP_AFTER")) {
     CreateThread(nullptr, 0, xp_thread_dump, (LPVOID)uintptr_t(atoi(seconds)), 0, nullptr);
+  }
+  if (getenv("XP_PROFILE")) {
+    CreateThread(nullptr, 0, xp_profile, nullptr, 0, nullptr);
   }
 #  endif
 
