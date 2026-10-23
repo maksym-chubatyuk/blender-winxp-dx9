@@ -36,6 +36,9 @@ set(WITH_INPUT_NDOF OFF CACHE BOOL "" FORCE)
 # SSE4, Cycles uses its own BVH.
 set(WITH_CYCLES ON CACHE BOOL "" FORCE)
 set(WITH_CYCLES_KERNEL_SSE2 ON CACHE BOOL "" FORCE)
+# Measured on the Pentium 4: -O3 renders ~5% faster than -O2. Profile guided builds and SSE3 gain
+# nothing, the SSE2 kernel is on par with the scalar one (half width SSE units).
+set(CYCLES_KERNEL_FLAGS "-O3" CACHE STRING "" FORCE)
 set(WITH_CYCLES_EMBREE OFF CACHE BOOL "" FORCE)
 set(WITH_CYCLES_OSL OFF CACHE BOOL "" FORCE)
 set(WITH_CYCLES_PATH_GUIDING OFF CACHE BOOL "" FORCE)

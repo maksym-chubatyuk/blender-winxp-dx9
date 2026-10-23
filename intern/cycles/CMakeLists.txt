@@ -82,6 +82,11 @@ elseif(CMAKE_SIZEOF_VOID_P EQUAL 4 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86|i[3
   if(WITH_CYCLES_KERNEL_SSE2)
     add_definitions(-DWITH_KERNEL_SSE2)
   endif()
+  if(MINGW)
+    # MinGW's 32-bit `math.h` implements `fabsf`, `isnan`, `signbit`... as inline x87 assembly,
+    # moving every value from SSE registers through memory: use the compiler's builtins instead.
+    add_definitions(-D__CRT__NO_INLINE)
+  endif()
 elseif(WIN32 AND MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   set(CXX_HAS_SSE42 TRUE)
   set(CXX_HAS_AVX2 TRUE)
