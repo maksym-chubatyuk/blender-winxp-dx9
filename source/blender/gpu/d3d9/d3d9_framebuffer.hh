@@ -65,8 +65,9 @@ class D3D9FrameBuffer : public FrameBuffer {
    * Bind the render targets on the device if they changed, then viewport and scissor.
    * \param blending: The draw blends. Without MRT blending support only the first color target
    * is bound then (the others only receive line data in the overlays, which isn't written).
+   * \param no_color_writes: The draw only writes depth.
    */
-  void apply_state(bool blending = false);
+  void apply_state(bool blending = false, bool no_color_writes = false);
   /** Force the next #apply_state to bind everything again. */
   void tag_dirty()
   {
@@ -93,6 +94,8 @@ class D3D9FrameBuffer : public FrameBuffer {
   bool dirty_targets_ = true;
   /** Only the first color target is bound, see #apply_state. */
   bool single_target_ = false;
+  /** A dummy color target is bound instead of the color targets, see #apply_state. */
+  bool depth_only_ = false;
   bool srgb_ = false;
   bool enabled_srgb_ = false;
 };

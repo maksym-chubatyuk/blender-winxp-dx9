@@ -328,6 +328,14 @@ bool D3D9Context::draw_setup_impl()
   if (sh == nullptr || !sh->is_valid()) {
     return false;
   }
+  /* `BLENDER_D3D9_SKIP=<shader name>,...`: drop the draws of these shaders (debugging). */
+  static const char *skip = getenv("BLENDER_D3D9_SKIP");
+  if (skip) {
+    const std::string list = std::string(",") + skip + ",";
+    if (list.find("," + sh->name_get() + ",") != std::string::npos) {
+      return false;
+    }
+  }
 
   D3D9FrameBuffer *fb = static_cast<D3D9FrameBuffer *>(active_fb);
   D3D9StateManager &state = state_manager_get();
@@ -336,7 +344,8 @@ bool D3D9Context::draw_setup_impl()
   }
   d3d9_frame_stats.draws++;
   double t = d3d9_time_ms();
-  fb->apply_state(state.state.blend != GPU_BLEND_NONE);
+  fb->apply_state(state.state.blend != GPU_BLEND_NONE,
+                  (state.state.write_mask & GPU_WRITE_COLOR) == 0);
   d3d9_frame_stats.fb_ms += d3d9_time_ms() - t;
   t = d3d9_time_ms();
   state.apply_state();
