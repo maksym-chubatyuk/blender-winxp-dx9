@@ -38,6 +38,7 @@ gpu_shader_text                                gpu_shader_text.hlsl
 d3d9_internal_blit                             d3d9_internal_blit.hlsl
 
 OCIO_Display                                   ocio_display.hlsl
+gpu_shader_2D_image_overlays_merge             gpu_shader_image_overlays_merge.hlsl
 
 # Draw engines.
 overlay_background                             overlay_background.hlsl

@@ -134,7 +134,9 @@ bool GHOST_ContextD3D9::swap_chain_create(int width, int height)
   pp.BackBufferHeight = UINT(height);
   pp.BackBufferFormat = D3DFMT_UNKNOWN;
   pp.BackBufferCount = 1;
-  pp.SwapEffect = D3DSWAPEFFECT_DISCARD;
+  /* Keep the back buffer after presenting: it is read back as the front buffer (the thumbnail of
+   * saved files). Windowed presents are copies either way. */
+  pp.SwapEffect = D3DSWAPEFFECT_COPY;
   pp.hDeviceWindow = hwnd_;
   pp.Windowed = TRUE;
   pp.PresentationInterval = swap_interval_ ? D3DPRESENT_INTERVAL_ONE :

@@ -288,6 +288,8 @@ void GPU_viewport_bind_from_offscreen(GPUViewport *viewport, GPUOffScreen *ofs, 
   gpu::FrameBuffer *fb;
   viewport->size[0] = GPU_offscreen_width(ofs);
   viewport->size[1] = GPU_offscreen_height(ofs);
+  /* Off-screen renders aren't scaled. */
+  viewport->display_size = viewport->size;
 
   GPU_offscreen_viewport_data_get(ofs, &fb, &color, &depth);
 

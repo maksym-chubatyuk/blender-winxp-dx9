@@ -97,12 +97,17 @@ D3D9Context::D3D9Context(GHOST_IWindow *ghost_window, GHOST_IContext *ghost_cont
                                 handles.width,
                                 handles.height);
   back_left = window_fb;
+  /* The window has no separate front buffer: reads of it (the file thumbnail on save) get the
+   * back buffer, which holds the last presented frame. Aliased, see the destructor. */
+  front_left = window_fb;
   active_fb = back_left;
   state_manager_get().active_fb = window_fb;
 }
 
 D3D9Context::~D3D9Context()
 {
+  /* Aliases `back_left`, freed once. */
+  front_left = nullptr;
   free_resources();
   end_scene();
   for (IDirect3DVertexDeclaration9 *decl : vertex_decls_.values()) {
