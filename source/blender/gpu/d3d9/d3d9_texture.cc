@@ -698,6 +698,20 @@ void D3D9Texture::convert_upload(const void *src_data,
       memcpy(d, s, size_t(width) * dst_texel);
       continue;
     }
+    if (device_format_.kind == D3D9TexelKind::HALF && device_format_.components == 4 &&
+        src_format == GPU_DATA_HALF_FLOAT && src_components == 3)
+    {
+      /* RGB half floats: opaque RGBA. */
+      const uint16_t *hs = reinterpret_cast<const uint16_t *>(s);
+      uint16_t *hd = reinterpret_cast<uint16_t *>(d);
+      for (int x = 0; x < width; x++, hs += 3, hd += 4) {
+        hd[0] = hs[0];
+        hd[1] = hs[1];
+        hd[2] = hs[2];
+        hd[3] = 0x3C00; /* 1.0 */
+      }
+      continue;
+    }
 
     float texel[4];
     for (int x = 0; x < width; x++, s += src_texel, d += dst_texel) {

@@ -253,6 +253,12 @@ void D3D9Backend::texture_cache_put(IDirect3DTexture9 *texture)
 {
   D3DSURFACE_DESC desc;
   texture->GetLevelDesc(0, &desc);
+  /* Only small textures (icons, text) are recycled: big ones of a size that keeps changing (the
+   * frames of an external render engine) would pile up hundreds of MB. */
+  if (desc.Width * desc.Height > 256 * 256) {
+    texture->Release();
+    return;
+  }
   texture_cache_.append(
       {texture, desc.Width, desc.Height, texture->GetLevelCount(), desc.Format, texture_cache_frame_});
 }
