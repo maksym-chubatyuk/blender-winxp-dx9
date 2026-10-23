@@ -312,54 +312,125 @@ XP_EXPORT(TaskDialogIndirect, 16)
 static HANDLE xp_watchdog_main_thread = NULL;
 static DWORD xp_watchdog_interval_ms = 0;
 
-static DWORD WINAPI xp_watchdog_thread(LPVOID unused)
+/* Append the main thread's instruction pointer and the stack values pointing into the executable's
+ * code (a superset of its call chain) to `f`. */
+static void xp_dump_main_thread(FILE *f, int dump)
 {
-  (void)unused;
   const IMAGE_DOS_HEADER *dos = (const IMAGE_DOS_HEADER *)GetModuleHandleA(NULL);
   const IMAGE_NT_HEADERS *nt = (const IMAGE_NT_HEADERS *)((const char *)dos + dos->e_lfanew);
   const DWORD image_start = (DWORD)dos;
   const DWORD image_end = image_start + nt->OptionalHeader.SizeOfImage;
-  for (int dump = 0;; dump++) {
-    Sleep(xp_watchdog_interval_ms);
-    FILE *f = fopen("xp_watchdog.txt", "a");
-    if (!f) {
-      continue;
-    }
-    CONTEXT ctx;
-    memset(&ctx, 0, sizeof(ctx));
-    ctx.ContextFlags = CONTEXT_FULL;
-    SuspendThread(xp_watchdog_main_thread);
-    if (GetThreadContext(xp_watchdog_main_thread, &ctx)) {
-      fprintf(f, "dump %d eip 0x%08lx esp 0x%08lx\n", dump, ctx.Eip, ctx.Esp);
-      MEMORY_BASIC_INFORMATION mbi;
-      if (VirtualQuery((LPCVOID)ctx.Esp, &mbi, sizeof(mbi))) {
-        const DWORD *sp = (const DWORD *)ctx.Esp;
-        const DWORD *end = (const DWORD *)((const char *)mbi.BaseAddress + mbi.RegionSize);
-        for (int n = 0; sp < end && n < 4000; sp++) {
-          if (*sp >= image_start && *sp < image_end) {
-            fprintf(f, "0x%08lx\n", *sp);
-            n++;
-          }
+  CONTEXT ctx;
+  memset(&ctx, 0, sizeof(ctx));
+  ctx.ContextFlags = CONTEXT_FULL;
+  SuspendThread(xp_watchdog_main_thread);
+  if (GetThreadContext(xp_watchdog_main_thread, &ctx)) {
+    fprintf(f, "dump %d eip 0x%08lx esp 0x%08lx\n", dump, ctx.Eip, ctx.Esp);
+    MEMORY_BASIC_INFORMATION mbi;
+    if (VirtualQuery((LPCVOID)ctx.Esp, &mbi, sizeof(mbi))) {
+      const DWORD *sp = (const DWORD *)ctx.Esp;
+      const DWORD *end = (const DWORD *)((const char *)mbi.BaseAddress + mbi.RegionSize);
+      for (int n = 0; sp < end && n < 4000; sp++) {
+        if (*sp >= image_start && *sp < image_end) {
+          fprintf(f, "0x%08lx\n", *sp);
+          n++;
         }
       }
     }
-    ResumeThread(xp_watchdog_main_thread);
-    fprintf(f, "end\n");
-    fclose(f);
+  }
+  ResumeThread(xp_watchdog_main_thread);
+  fprintf(f, "end\n");
+}
+
+static DWORD WINAPI xp_watchdog_thread(LPVOID unused)
+{
+  (void)unused;
+  for (int dump = 0;; dump++) {
+    Sleep(xp_watchdog_interval_ms);
+    FILE *f = fopen("xp_watchdog.txt", "a");
+    if (f) {
+      xp_dump_main_thread(f, dump);
+      fclose(f);
+    }
+  }
+  return 0;
+}
+
+/* Hang detector, always on (`XP_HANG=0` disables it): the main window is pinged like Windows does
+ * for "Not Responding"; while it doesn't answer for 5 s, the main thread's stack is dumped to
+ * `xp_hang.txt` next to the executable (at most 6 dumps per hang). */
+static DWORD xp_hang_pid = 0;
+static HWND xp_hang_window = NULL;
+
+static BOOL CALLBACK xp_hang_find_window(HWND hwnd, LPARAM unused)
+{
+  (void)unused;
+  DWORD pid = 0;
+  char cls[64];
+  GetWindowThreadProcessId(hwnd, &pid);
+  if (pid == xp_hang_pid && IsWindowVisible(hwnd) && GetClassNameA(hwnd, cls, sizeof(cls)) &&
+      strcmp(cls, "GHOST_WindowClass") == 0)
+  {
+    xp_hang_window = hwnd;
+    return FALSE;
+  }
+  return TRUE;
+}
+
+static DWORD WINAPI xp_hang_thread(LPVOID unused)
+{
+  (void)unused;
+  char path[MAX_PATH];
+  DWORD len = GetModuleFileNameA(NULL, path, MAX_PATH);
+  while (len > 0 && path[len - 1] != '\\' && path[len - 1] != '/') {
+    len--;
+  }
+  if (len == 0 || len + sizeof("xp_hang.txt") > MAX_PATH) {
+    return 0;
+  }
+  strcpy(path + len, "xp_hang.txt");
+  int dumps = 0;
+  for (;;) {
+    Sleep(2000);
+    xp_hang_window = NULL;
+    EnumWindows(xp_hang_find_window, 0);
+    if (xp_hang_window == NULL) {
+      continue;
+    }
+    DWORD_PTR result;
+    if (SendMessageTimeoutA(xp_hang_window, WM_NULL, 0, 0, SMTO_ABORTIFHUNG, 5000, &result)) {
+      dumps = 0;
+      continue;
+    }
+    if (dumps >= 6) {
+      continue;
+    }
+    FILE *f = fopen(path, "a");
+    if (f) {
+      SYSTEMTIME t;
+      GetLocalTime(&t);
+      fprintf(f,
+              "hang %04d-%02d-%02d %02d:%02d:%02d\n",
+              t.wYear,
+              t.wMonth,
+              t.wDay,
+              t.wHour,
+              t.wMinute,
+              t.wSecond);
+      xp_dump_main_thread(f, dumps);
+      fclose(f);
+      if (dumps == 0) {
+        fprintf(stderr, "xpcompat: the main window doesn't respond, stacks in %s\n", path);
+      }
+    }
+    dumps++;
   }
   return 0;
 }
 
 __attribute__((constructor)) static void xp_watchdog_init(void)
 {
-  char value[16];
-  if (!GetEnvironmentVariableA("XP_WATCHDOG", value, sizeof(value))) {
-    return;
-  }
-  xp_watchdog_interval_ms = (DWORD)atoi(value) * 1000;
-  if (xp_watchdog_interval_ms == 0) {
-    return;
-  }
+  /* Constructors run on the main thread. */
   DuplicateHandle(GetCurrentProcess(),
                   GetCurrentThread(),
                   GetCurrentProcess(),
@@ -367,6 +438,18 @@ __attribute__((constructor)) static void xp_watchdog_init(void)
                   THREAD_ALL_ACCESS,
                   FALSE,
                   0);
+  char value[16];
+  if (!GetEnvironmentVariableA("XP_HANG", value, sizeof(value)) || strcmp(value, "0") != 0) {
+    xp_hang_pid = GetCurrentProcessId();
+    CreateThread(NULL, 0, xp_hang_thread, NULL, 0, NULL);
+  }
+  if (!GetEnvironmentVariableA("XP_WATCHDOG", value, sizeof(value))) {
+    return;
+  }
+  xp_watchdog_interval_ms = (DWORD)atoi(value) * 1000;
+  if (xp_watchdog_interval_ms == 0) {
+    return;
+  }
   CreateThread(NULL, 0, xp_watchdog_thread, NULL, 0, NULL);
 }
 
@@ -398,7 +481,8 @@ __attribute__((constructor)) static void xp_timer_resolution_init(void)
 /* -------------------------------------------------------------------- */
 /** \name Log file
  *
- * Started from Explorer, Blender has no console: its output is lost. Write it to
+ * Started from Explorer or `blender-launcher.exe`, Blender has no (visible) console: its output is
+ * lost. Write it to
  * `blender_xp.log` next to the executable instead, unbuffered and written through to the disk so
  * the last lines survive a system hang (display driver crashes take XP down). `XP_LOG=0` disables
  * it, `XP_LOG=1` forces it.
@@ -412,10 +496,23 @@ __attribute__((constructor)) static void xp_log_init(void)
   }
   HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
   const int forced = env && strcmp(env, "1") == 0;
-  if (!forced && out != NULL && out != INVALID_HANDLE_VALUE &&
-      GetFileType(out) != FILE_TYPE_UNKNOWN)
-  {
-    return; /* A console or a pipe. */
+  if (!forced && out != NULL && out != INVALID_HANDLE_VALUE) {
+    const DWORD type = GetFileType(out);
+    /* A pipe or a file: someone reads the output. A console counts only if it is visible:
+     * `blender-launcher.exe` starts Blender with a hidden one. */
+    if (type == FILE_TYPE_PIPE || type == FILE_TYPE_DISK) {
+      return;
+    }
+    if (type == FILE_TYPE_CHAR) {
+      HMODULE kernel = GetModuleHandleA("kernel32.dll");
+      typedef HWND(WINAPI * GetConsoleWindowFn)(void);
+      GetConsoleWindowFn get_console_window = (GetConsoleWindowFn)(void *)GetProcAddress(
+          kernel, "GetConsoleWindow");
+      HWND console = get_console_window ? get_console_window() : NULL;
+      if (console && IsWindowVisible(console)) {
+        return;
+      }
+    }
   }
   char path[MAX_PATH];
   DWORD len = GetModuleFileNameA(NULL, path, MAX_PATH);

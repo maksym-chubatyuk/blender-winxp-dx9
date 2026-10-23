@@ -254,6 +254,7 @@ void D3D9VertBuf::upload_data()
 
 IDirect3DVertexBuffer9 *D3D9VertBuf::buffer_get()
 {
+  D3D9_HEAP_CHECK_SCOPE("D3D9VertBuf::buffer_get");
   if (vbo_ != nullptr && !(flag & GPU_VERTBUF_DATA_DIRTY)) {
     return vbo_;
   }
@@ -302,6 +303,7 @@ IDirect3DVertexBuffer9 *D3D9VertBuf::buffer_get()
 
 IDirect3DVertexBuffer9 *D3D9VertBuf::deindexed_get(D3D9IndexBuf &ib, uint start, uint count)
 {
+  D3D9_HEAP_CHECK_SCOPE("D3D9VertBuf::deindexed_get");
   if (buffer_get() == nullptr || count == 0) {
     return nullptr;
   }
@@ -364,6 +366,7 @@ IDirect3DVertexBuffer9 *D3D9VertBuf::deindexed_get(D3D9IndexBuf &ib, uint start,
 
 void D3D9VertBuf::update_sub(uint start, uint len, const void *data)
 {
+  D3D9_HEAP_CHECK_SCOPE("D3D9VertBuf::update_sub");
   const D3D9VertexLayout &layout = layout_get();
   if (layout.is_identity) {
     if (buffer_get() == nullptr || start + len > vbo_size_) {
@@ -388,6 +391,7 @@ void D3D9VertBuf::update_sub(uint start, uint len, const void *data)
 
 void D3D9VertBuf::read(void *data) const
 {
+  D3D9_HEAP_CHECK_SCOPE("D3D9VertBuf::read");
   const size_t size = size_used_get();
   if (data_) {
     memcpy(data, data_, size);

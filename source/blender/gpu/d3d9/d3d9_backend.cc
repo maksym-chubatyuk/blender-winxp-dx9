@@ -29,6 +29,26 @@ namespace blender::gpu {
 
 static CLG_LogRef LOG = {"gpu.d3d9"};
 
+void d3d9_heap_check(const char *where)
+{
+  static const bool enabled = getenv("BLENDER_D3D9_HEAPCHECK") != nullptr;
+  static bool reported = false;
+  static const char *last_ok = "start";
+  if (!enabled || reported) {
+    return;
+  }
+  if (HeapValidate(GetProcessHeap(), 0, nullptr)) {
+    last_ok = where;
+    return;
+  }
+  reported = true;
+  fprintf(stderr,
+          "d3d9: HEAP CORRUPTED, found after \"%s\" (last valid after \"%s\")\n",
+          where,
+          last_ok);
+  fflush(stderr);
+}
+
 bool d3d9_check(HRESULT hr, const char *call, const char *file, int line)
 {
   if (SUCCEEDED(hr)) {

@@ -29,6 +29,7 @@ D3D9IndexBuf::~D3D9IndexBuf()
 
 IDirect3DIndexBuffer9 *D3D9IndexBuf::buffer_get()
 {
+  D3D9_HEAP_CHECK_SCOPE("D3D9IndexBuf::buffer_get");
   if (is_subrange_) {
     return static_cast<D3D9IndexBuf *>(src_)->buffer_get();
   }
@@ -83,6 +84,7 @@ void D3D9IndexBuf::read(uint32_t *data) const
 
 void D3D9IndexBuf::update_sub(uint start, uint len, const void *data)
 {
+  D3D9_HEAP_CHECK_SCOPE("D3D9IndexBuf::update_sub");
   if (buffer_get() == nullptr) {
     return;
   }
@@ -96,6 +98,7 @@ void D3D9IndexBuf::update_sub(uint start, uint len, const void *data)
 
 Span<uint32_t> D3D9IndexBuf::host_indices_get()
 {
+  D3D9_HEAP_CHECK_SCOPE("D3D9IndexBuf::host_indices_get");
   if (is_subrange_) {
     return source_get()->host_indices_get();
   }

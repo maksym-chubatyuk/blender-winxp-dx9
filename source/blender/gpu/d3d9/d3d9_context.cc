@@ -236,6 +236,7 @@ void D3D9Context::begin_frame()
 
 void D3D9Context::end_frame()
 {
+  D3D9_HEAP_CHECK_SCOPE("D3D9Context::end_frame");
   /* `Present` must be called outside of a scene. */
   end_scene();
   D3D9Backend::get()->texture_cache_frame();
@@ -280,6 +281,7 @@ void D3D9Context::end_frame()
 
 void D3D9Context::flush()
 {
+  D3D9_HEAP_CHECK_SCOPE("D3D9Context::flush");
   end_scene();
 }
 
@@ -495,6 +497,7 @@ bool D3D9Context::select_draw_begin()
 
 void D3D9Context::select_draw_end()
 {
+  D3D9_HEAP_CHECK_SCOPE("D3D9Context::select_draw_end");
   D3D9FrameBuffer *fb = static_cast<D3D9FrameBuffer *>(active_fb);
   device->SetRenderState(D3DRS_COLORWRITEENABLE, select_saved_states_[0]);
   device->SetRenderState(D3DRS_ALPHABLENDENABLE, select_saved_states_[1]);

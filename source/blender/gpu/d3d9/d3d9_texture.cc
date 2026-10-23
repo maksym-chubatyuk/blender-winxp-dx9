@@ -445,6 +445,7 @@ bool D3D9Texture::init_internal(gpu::Texture *src,
 
 bool D3D9Texture::ensure_resource(bool render_target)
 {
+  D3D9_HEAP_CHECK_SCOPE("D3D9Texture::ensure_resource");
   if (source_) {
     return source_->ensure_resource(render_target);
   }
@@ -728,6 +729,7 @@ void D3D9Texture::update_sub(int mip,
                              const void *data,
                              uint unpack_row_length)
 {
+  D3D9_HEAP_CHECK_SCOPE("D3D9Texture::update_sub");
   d3d9_frame_stats.upload_bytes += size_t(max_ii(extent[0], 1)) * max_ii(extent[1], 1) *
                                    max_ii(extent[2], 1) * 4;
   static const bool frametime = getenv("BLENDER_D3D9_FRAMETIME") != nullptr;
@@ -943,6 +945,7 @@ bool D3D9Texture::clear_on_device(const double4 &data)
 
 void D3D9Texture::clear(double4 data)
 {
+  D3D9_HEAP_CHECK_SCOPE("D3D9Texture::clear");
   if (source_) {
     source_->clear(data);
     return;
@@ -987,6 +990,7 @@ void D3D9Texture::clear(double4 data)
 
 void D3D9Texture::read(int mip, eGPUDataFormat format, void *r_data)
 {
+  D3D9_HEAP_CHECK_SCOPE("D3D9Texture::read");
   const size_t size = read_size_get(mip, format);
   memset(r_data, 0, size);
   if (source_) {
@@ -1067,6 +1071,7 @@ void D3D9Texture::read(int mip, eGPUDataFormat format, void *r_data)
 
 void D3D9Texture::generate_mipmap()
 {
+  D3D9_HEAP_CHECK_SCOPE("D3D9Texture::generate_mipmap");
   if (source_ || device_levels_ <= 1 || tex2d_ == nullptr || is_render_target_) {
     return;
   }
@@ -1109,6 +1114,7 @@ void D3D9Texture::generate_mipmap()
 
 void D3D9Texture::copy_to(Texture *dst_, IndexRange mip_levels)
 {
+  D3D9_HEAP_CHECK_SCOPE("D3D9Texture::copy_to");
   D3D9Texture *dst = static_cast<D3D9Texture *>(dst_);
   IDirect3DDevice9 *device = D3D9Backend::get()->device;
   if (is_depth() || dst->is_depth()) {

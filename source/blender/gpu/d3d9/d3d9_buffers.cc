@@ -35,6 +35,7 @@ D3D9UniformBuf::~D3D9UniformBuf()
 
 void D3D9UniformBuf::update(const void *data)
 {
+  D3D9_HEAP_CHECK_SCOPE("D3D9UniformBuf::update");
   memcpy(host_data_.data(), data, size_in_bytes_);
 }
 
@@ -133,6 +134,7 @@ void D3D9StorageBuf::unbind()
 
 void D3D9StorageBuf::update(const void *data)
 {
+  D3D9_HEAP_CHECK_SCOPE("D3D9StorageBuf::update");
   vbo_dirty_ = true;
   memcpy(host_data_.data(), data, min_zz(usage_size_in_bytes_, host_data_.size()));
 }

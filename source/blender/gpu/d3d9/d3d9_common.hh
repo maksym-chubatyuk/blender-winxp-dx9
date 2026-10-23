@@ -51,6 +51,22 @@ template<typename T> inline void d3d9_release(T *&ptr)
   }
 }
 
+/**
+ * `BLENDER_D3D9_HEAPCHECK=1`: validate the process heap (the C runtime's and the managed resources'
+ * system copies) after the operation named `where`, report the first one after which it is corrupt.
+ */
+void d3d9_heap_check(const char *where);
+
+/** Runs #d3d9_heap_check when the scope ends (every return of a function). */
+struct D3D9HeapCheckScope {
+  const char *where;
+  ~D3D9HeapCheckScope()
+  {
+    d3d9_heap_check(where);
+  }
+};
+#define D3D9_HEAP_CHECK_SCOPE(where) const D3D9HeapCheckScope d3d9_heap_check_scope_{where}
+
 /** Report a failed D3D call (once per call site), returns true on success. */
 bool d3d9_check(HRESULT hr, const char *call, const char *file, int line);
 #define D3D9_CHECK(call) blender::gpu::d3d9_check((call), #call, __FILE__, __LINE__)

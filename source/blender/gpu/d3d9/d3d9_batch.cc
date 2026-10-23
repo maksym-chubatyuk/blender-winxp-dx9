@@ -70,6 +70,7 @@ D3D9Batch::~D3D9Batch()
 
 bool D3D9Batch::bind_lines_adjacency()
 {
+  D3D9_HEAP_CHECK_SCOPE("D3D9Batch::bind_lines_adjacency");
   D3D9VertBuf *vbo = static_cast<D3D9VertBuf *>(verts[0]);
   if (vbo == nullptr || vbo->format.attr_len == 0 || vbo->buffer_get() == nullptr) {
     return false;
@@ -286,6 +287,7 @@ bool D3D9Batch::bind_vertex_streams(D3D9Shader *shader, const DeindexRange *dein
 
 void D3D9Batch::draw(int v_first, int v_count, int i_first, int i_count)
 {
+  D3D9_HEAP_CHECK_SCOPE("D3D9Batch::draw");
   D3D9Context *ctx = D3D9Context::get();
   D3D9Shader *shader = static_cast<D3D9Shader *>(ctx->shader);
   if (v_count <= 0 || i_count <= 0) {

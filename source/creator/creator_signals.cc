@@ -189,6 +189,43 @@ extern LONG WINAPI windows_exception_handler(EXCEPTION_POINTERS *ExceptionInfo)
     sig_cleanup_and_terminate(SIGSEGV);
   }
   else {
+#    ifdef __MINGW32__
+    {
+      /* XP port: the crash may come from a corrupted heap, which the regular crash report below
+       * can trip on. Print the essentials first, without allocating: the exception, and the stack
+       * values pointing into the executable (a superset of the call chain). */
+      char line[160];
+      DWORD written;
+      const HANDLE err = GetStdHandle(STD_ERROR_HANDLE);
+      const EXCEPTION_RECORD *rec = ExceptionInfo->ExceptionRecord;
+      int len = snprintf(line,
+                         sizeof(line),
+                         "Exception 0x%08lx at 0x%p, access 0x%p\nStack:",
+                         (unsigned long)rec->ExceptionCode,
+                         rec->ExceptionAddress,
+                         rec->NumberParameters > 1 ? (void *)rec->ExceptionInformation[1] :
+                                                     nullptr);
+      WriteFile(err, line, DWORD(len), &written, nullptr);
+      const IMAGE_DOS_HEADER *dos = (const IMAGE_DOS_HEADER *)GetModuleHandleA(nullptr);
+      const IMAGE_NT_HEADERS *nt = (const IMAGE_NT_HEADERS *)((const char *)dos + dos->e_lfanew);
+      const uintptr_t image_start = uintptr_t(dos);
+      const uintptr_t image_end = image_start + nt->OptionalHeader.SizeOfImage;
+      const uintptr_t *sp = (const uintptr_t *)ExceptionInfo->ContextRecord->Esp;
+      MEMORY_BASIC_INFORMATION mbi;
+      if (VirtualQuery(sp, &mbi, sizeof(mbi))) {
+        const uintptr_t *end = (const uintptr_t *)((const char *)mbi.BaseAddress +
+                                                   mbi.RegionSize);
+        for (int n = 0; sp < end && n < 300; sp++) {
+          if (*sp >= image_start && *sp < image_end) {
+            len = snprintf(line, sizeof(line), " %08lx", (unsigned long)*sp);
+            WriteFile(err, line, DWORD(len), &written, nullptr);
+            n++;
+          }
+        }
+      }
+      WriteFile(err, "\n", 1, &written, nullptr);
+    }
+#    endif
     auto crash_func = [&]() {
       char filepath_crashlog[FILE_MAX];
       BLI_windows_exception_print_message(ExceptionInfo);
@@ -214,6 +251,16 @@ extern LONG WINAPI windows_exception_handler(EXCEPTION_POINTERS *ExceptionInfo)
         sig_cleanup_and_terminate(SIGSEGV);
       }
     };
+
+    /* A crash while handling a crash (a corrupted heap) would wait forever in `std::call_once`
+     * below: the window freezes instead of closing. Give up at once. */
+    static volatile LONG handler_thread = 0;
+    const LONG thread = LONG(GetCurrentThreadId());
+    if (InterlockedCompareExchange(&handler_thread, thread, 0) == thread) {
+      fprintf(stderr, "Error   : crashed again while handling a crash, terminating\n");
+      fflush(stderr);
+      TerminateProcess(GetCurrentProcess(), SIGSEGV);
+    }
 
     /* The use of `std::call_once` ensures that the crash handling function is only executed once,
      * even if multiple crashes occur simultaneously. */

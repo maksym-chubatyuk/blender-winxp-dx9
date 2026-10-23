@@ -402,6 +402,7 @@ void D3D9FrameBuffer::read(GPUFrameBufferBits planes,
                            int slot,
                            void *r_data)
 {
+  D3D9_HEAP_CHECK_SCOPE("D3D9FrameBuffer::read");
   const size_t texel_size = size_t(channel_len) *
                             (format == GPU_DATA_UBYTE ? 1 :
                              format == GPU_DATA_HALF_FLOAT ? 2 :
