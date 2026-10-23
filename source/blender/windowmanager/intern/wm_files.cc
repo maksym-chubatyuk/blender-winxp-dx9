@@ -155,6 +155,14 @@
 
 #include "CLG_log.h"
 
+#ifdef __MINGW32__
+/* XP port: heap checks (`intern/xpcompat`, `XP_HEAPCHECK=1`). */
+extern "C" void xp_heap_check(const char *where);
+#  define XP_HEAP_CHECK(where) xp_heap_check(where)
+#else
+#  define XP_HEAP_CHECK(where)
+#endif
+
 namespace blender {
 
 static RecentFile *wm_file_history_find(const char *filepath);
@@ -1867,7 +1875,9 @@ static ImBuf *blend_file_thumb_from_screenshot(bContext *C, BlendThumbnail **r_t
    * even if this means the thumbnail from the screen-shot fails to be created, see: #98462. */
   ImBuf *ibuf = nullptr;
 
+  XP_HEAP_CHECK("thumbnail: before the window read");
   if (uint8_t *buffer = WM_window_pixels_read_from_frontbuffer(wm, win, win_size)) {
+    XP_HEAP_CHECK("thumbnail: window read");
     const int2 thumb_size_2x = blend_file_thumb_clamp_size(win_size, BLEN_THUMB_SIZE * 2);
     const int2 thumb_size = blend_file_thumb_clamp_size(win_size, BLEN_THUMB_SIZE);
 
@@ -1882,6 +1892,7 @@ static ImBuf *blend_file_thumb_from_screenshot(bContext *C, BlendThumbnail **r_t
       BlendThumbnail *thumb = BKE_main_thumbnail_from_buffer(nullptr, rect, thumb_size);
       MEM_delete(rect);
       *r_thumb = thumb;
+      XP_HEAP_CHECK("thumbnail: fast downscale");
     }
     else
 #endif /* USE_THUMBNAIL_FAST_DOWNSCALE */
@@ -1899,6 +1910,7 @@ static ImBuf *blend_file_thumb_from_screenshot(bContext *C, BlendThumbnail **r_t
       BlendThumbnail *thumb = BKE_main_thumbnail_from_imbuf(nullptr, thumb_ibuf);
       IMB_freeImBuf(thumb_ibuf);
       *r_thumb = thumb;
+      XP_HEAP_CHECK("thumbnail: scale");
     }
   }
 
@@ -2208,6 +2220,7 @@ static bool wm_file_write(bContext *C,
   }
 
   ED_editors_flush_edits(bmain);
+  XP_HEAP_CHECK("save: thumbnail and flush edits");
 
   /* XXX(ton): temp solution to solve bug, real fix coming. */
   bmain->recovered = false;
@@ -2219,6 +2232,7 @@ static bool wm_file_write(bContext *C,
   blend_write_params.thumb = thumb;
 
   const bool success = BLO_write_file(bmain, filepath, fileflags, &blend_write_params, reports);
+  XP_HEAP_CHECK("save: write file");
 
   if (success) {
     const bool do_history_file_update = (G.background == false) &&
@@ -2234,6 +2248,7 @@ static bool wm_file_write(bContext *C,
     if (do_history_file_update) {
       wm_history_file_update();
     }
+    XP_HEAP_CHECK("save: history file");
 
     /* Run this function after because the file can't be written before the blend is. */
     if (ibuf_thumb) {
@@ -2245,6 +2260,7 @@ static bool wm_file_write(bContext *C,
       if (saved_ibuf_thumb) {
         ibuf_thumb = saved_ibuf_thumb;
       }
+      XP_HEAP_CHECK("save: thumbnail file");
     }
   }
 

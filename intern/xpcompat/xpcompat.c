@@ -479,6 +479,37 @@ __attribute__((constructor)) static void xp_timer_resolution_init(void)
 /** \} */
 
 /* -------------------------------------------------------------------- */
+/** \name Heap checks
+ *
+ * `XP_HEAPCHECK=1`: #xp_heap_check validates the process heap (the C runtime's) and reports the
+ * first call after which it is corrupt, with the last one it was still valid after.
+ * \{ */
+
+void xp_heap_check(const char *where)
+{
+  static int enabled = -1;
+  static int reported = 0;
+  static const char *last_ok = "start";
+  if (enabled < 0) {
+    const char *env = getenv("XP_HEAPCHECK");
+    enabled = env && strcmp(env, "0") != 0;
+  }
+  if (!enabled || reported) {
+    return;
+  }
+  if (HeapValidate(GetProcessHeap(), 0, NULL)) {
+    last_ok = where;
+    return;
+  }
+  reported = 1;
+  fprintf(stderr, "xpcompat: HEAP CORRUPTED, found after \"%s\" (valid after \"%s\")\n", where,
+          last_ok);
+  fflush(stderr);
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
 /** \name Log file
  *
  * Started from Explorer or `blender-launcher.exe`, Blender has no (visible) console: its output is
