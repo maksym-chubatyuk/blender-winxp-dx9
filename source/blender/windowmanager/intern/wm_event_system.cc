@@ -93,6 +93,11 @@
 
 #include "RE_pipeline.h"
 
+#ifdef __MINGW32__
+/* XP port: heap checks (`intern/xpcompat`, `XP_HEAPCHECK=1`). */
+extern "C" void xp_heap_check(const char *where);
+#endif
+
 namespace blender {
 
 /**
@@ -4462,6 +4467,19 @@ void wm_event_do_handlers(bContext *C)
       /* Update previous mouse position for following events to use. */
       copy_v2_v2_int(win.runtime->eventstate->prev_xy, event->xy);
 
+#ifdef __MINGW32__
+      {
+        /* Which event (and operator) corrupted the heap, if one does. */
+        const wmOperator *op_last = static_cast<const wmOperator *>(wm->runtime->operators.last);
+        char where[160];
+        SNPRINTF(where,
+                 "event %d value %d (last registered operator %s)",
+                 int(event->type),
+                 int(event->val),
+                 op_last ? op_last->idname : "none");
+        xp_heap_check(where);
+      }
+#endif
       /* Un-link and free here, Blender-quit then frees all. */
       BLI_remlink(&win.runtime->event_queue, event);
       wm_event_free_last_handled(&win, event);

@@ -489,7 +489,7 @@ void xp_heap_check(const char *where)
 {
   static int enabled = -1;
   static int reported = 0;
-  static const char *last_ok = "start";
+  static char last_ok[256] = "start";
   if (enabled < 0) {
     const char *env = getenv("XP_HEAPCHECK");
     enabled = env && strcmp(env, "0") != 0;
@@ -498,7 +498,7 @@ void xp_heap_check(const char *where)
     return;
   }
   if (HeapValidate(GetProcessHeap(), 0, NULL)) {
-    last_ok = where;
+    snprintf(last_ok, sizeof(last_ok), "%s", where);
     return;
   }
   reported = 1;

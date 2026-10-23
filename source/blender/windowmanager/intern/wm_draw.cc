@@ -74,6 +74,11 @@
 
 #include "IMB_colormanagement.hh"
 
+#ifdef __MINGW32__
+/* XP port: heap checks (`intern/xpcompat`, `XP_HEAPCHECK=1`). */
+extern "C" void xp_heap_check(const char *where);
+#endif
+
 namespace blender {
 
 #ifdef WITH_OPENSUBDIV
@@ -1650,6 +1655,10 @@ void WM_paint_cursor_tag_redraw(wmWindow *win, ARegion * /*region*/)
 
 void wm_draw_update(bContext *C)
 {
+#ifdef __MINGW32__
+  /* Heap checks: after the previous redraw (and the timers and jobs since). */
+  xp_heap_check("redraw (or timers, jobs before it)");
+#endif
   PRF_scope(ProfileCategory::Draw);
 
   Main *bmain = CTX_data_main(C);
