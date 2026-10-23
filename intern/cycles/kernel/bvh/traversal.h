@@ -45,7 +45,6 @@ ccl_device_noinline bool BVH_FUNCTION_FULL_NAME(BVH)(KernelGlobals kg,
   float3 P = ray->P;
   float3 dir = bvh_clamp_direction(ray->D);
   float3 idir = bvh_inverse_direction(dir);
-  BVH_NODE_RAY_DECLARE();
   const float tmin = ray->tmin;
   int object = OBJECT_NONE;
 
@@ -70,7 +69,7 @@ ccl_device_noinline bool BVH_FUNCTION_FULL_NAME(BVH)(KernelGlobals kg,
 #if BVH_FEATURE(BVH_HAIR)
                                          dir,
 #endif
-                                         BVH_NODE_RAY,
+                                         idir,
                                          tmin,
                                          isect->t,
                                          node_addr,
@@ -236,7 +235,6 @@ ccl_device_noinline bool BVH_FUNCTION_FULL_NAME(BVH)(KernelGlobals kg,
 #else
           bvh_instance_push(kg, object, ray, &P, &dir, &idir);
 #endif
-          BVH_NODE_RAY_UPDATE();
 
           ++stack_ptr;
           kernel_assert(stack_ptr < BVH_STACK_SIZE);
@@ -252,7 +250,6 @@ ccl_device_noinline bool BVH_FUNCTION_FULL_NAME(BVH)(KernelGlobals kg,
 
       /* instance pop */
       bvh_instance_pop(ray, &P, &dir, &idir);
-      BVH_NODE_RAY_UPDATE();
 
       object = OBJECT_NONE;
       node_addr = traversal_stack[stack_ptr];
