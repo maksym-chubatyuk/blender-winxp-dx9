@@ -195,6 +195,10 @@ void D3D9Backend::capabilities_init()
   supports_scissor = (caps.RasterCaps & D3DPRASTERCAPS_SCISSORTEST) != 0;
 
   GCaps.max_texture_size = int(min_uu(caps.MaxTextureWidth, caps.MaxTextureHeight));
+  /* `BLENDER_D3D9_EMULATE_R300`: the texture size limit of the Radeon 9x00. */
+  if (getenv("BLENDER_D3D9_EMULATE_R300")) {
+    GCaps.max_texture_size = min_ii(GCaps.max_texture_size, 2048);
+  }
   GCaps.max_texture_3d_size = int(caps.MaxVolumeExtent);
   GCaps.max_texture_layers = 1;
   GCaps.max_textures = 16;

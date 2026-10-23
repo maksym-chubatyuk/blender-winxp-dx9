@@ -9,6 +9,7 @@
 #include "BKE_context.hh"
 
 #include "GPU_capabilities.hh"
+#include "GPU_context.hh"
 
 #include "DRW_engine.hh"
 #include "draw_view_data.hh"
@@ -83,9 +84,12 @@ class Instance : public DrawEngine {
         return std::make_unique<ImageSpaceDrawingMode>(*this, buffer->gpu.texture);
       }
 
-      /* Buffer does not exist or image will not fit in a GPU texture, use screen space drawing. */
+      /* Buffer does not exist or image will not fit in a GPU texture, use screen space drawing.
+       * Direct3D 9 has no screen space drawing: there any image up to the maximum texture size
+       * fits (2048 on the Radeon 9x00, a render of 1080x1080 is already above the safe size). */
       if (!buffer || (!buffer->float_data() && !buffer->byte_data()) ||
-          !GPU_is_safe_texture_size(buffer->x, buffer->y))
+          (!GPU_is_safe_texture_size(buffer->x, buffer->y) &&
+           GPU_backend_get_type() != GPU_BACKEND_D3D9))
       {
         return std::make_unique<ScreenSpaceDrawingMode>(*this);
       }
