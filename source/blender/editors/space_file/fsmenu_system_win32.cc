@@ -122,13 +122,15 @@ static void fsmenu_add_windows_folder(FSMenu *fsmenu,
                                       const int icon,
                                       FSMenuInsert flag)
 {
-  LPWSTR pPath;
+  /* XP port: the path isn't set when the folder doesn't exist (Downloads, OneDrive... on XP),
+   * freeing it uninitialized corrupted the heap (crashes after saving, which reads these again). */
+  LPWSTR pPath = nullptr;
   char line[FILE_MAXDIR];
   if (SHGetKnownFolderPath(rfid, 0, nullptr, &pPath) == S_OK) {
     conv_utf_16_to_8(pPath, line, FILE_MAXDIR);
     fsmenu_insert_entry(fsmenu, category, line, name, icon, flag);
+    CoTaskMemFree(pPath);
   }
-  CoTaskMemFree(pPath);
 }
 
 static int fsmenu_external_drive_icon(char drive_letter)

@@ -129,24 +129,9 @@ const char *GHOST_SystemPathsWin32::getBinaryDir() const
 
 void GHOST_SystemPathsWin32::addToSystemRecentFiles(const char *filepath) const
 {
+  /* XP port: Windows XP doesn't know `SHARD_APPIDINFO` (Windows 7), adding a shell item with it
+   * corrupted the heap and crashed on the next save. Add the path instead. */
   UTF16_ENCODE(filepath);
-  UTF16_ENCODE(BLENDER_WIN_APPID);
-  SHARDAPPIDINFO info;
-  IShellItem *shell_item;
-
-  HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-  if (!SUCCEEDED(hr)) {
-    return;
-  }
-
-  hr = SHCreateItemFromParsingName(filepath_16, nullptr, IID_PPV_ARGS(&shell_item));
-  if (SUCCEEDED(hr)) {
-    info.psi = shell_item;
-    info.pszAppID = BLENDER_WIN_APPID_16;
-    SHAddToRecentDocs(SHARD_APPIDINFO, &info);
-  }
-
-  CoUninitialize();
-  UTF16_UN_ENCODE(BLENDER_WIN_APPID);
+  SHAddToRecentDocs(SHARD_PATHW, filepath_16);
   UTF16_UN_ENCODE(filepath);
 }
