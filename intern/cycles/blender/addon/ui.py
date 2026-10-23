@@ -343,7 +343,14 @@ class CYCLES_RENDER_PT_sampling_render_denoise(CyclesButtonsPanel, Panel):
         sub.active = show_denoise_active(context)
         sub.prop(cscene, "denoiser", text="Denoiser")
 
-        col.prop(cscene, "denoising_input_passes", text="Passes")
+        if cscene.denoiser == 'NLM':
+            cview_layer = context.view_layer.cycles
+            col.prop(cview_layer, "denoising_radius", text="Radius")
+            col.prop(cview_layer, "denoising_strength", slider=True, text="Strength")
+            col.prop(cview_layer, "denoising_feature_strength", slider=True, text="Feature Strength")
+            col.prop(cview_layer, "denoising_relative_pca")
+        else:
+            col.prop(cscene, "denoising_input_passes", text="Passes")
         if cscene.denoiser == 'OPENIMAGEDENOISE':
             col.prop(cscene, "denoising_prefilter", text="Prefilter")
             col.prop(cscene, "denoising_quality", text="Quality")

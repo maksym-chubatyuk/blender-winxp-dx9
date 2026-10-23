@@ -30,6 +30,7 @@ ccl_device_inline void kernel_filter_construct_gramian(int x,
                                                        ccl_global float3 *XtWY,
                                                        int localIdx)
 {
+  (void)localIdx; /* Only used on GPUs. */
   if (weight < 1e-3f) {
     return;
   }

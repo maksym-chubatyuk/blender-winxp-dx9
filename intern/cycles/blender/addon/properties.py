@@ -1583,6 +1583,31 @@ class CyclesRenderLayerSettings(bpy.types.PropertyGroup):
         default=True,
         update=update_render_passes,
     )
+    # Settings of the NLM denoiser (builds without OpenImageDenoise), as in Blender 2.9x.
+    denoising_strength: FloatProperty(
+        name="Denoising Strength",
+        description="Controls neighbor pixel weighting for the denoising filter (lower values preserve more detail, but aren't as smooth)",
+        min=0.0, max=1.0,
+        default=0.5,
+    )
+    denoising_feature_strength: FloatProperty(
+        name="Denoising Feature Strength",
+        description="Controls removal of noisy image feature passes (lower values preserve more detail, but aren't as smooth)",
+        min=0.0, max=1.0,
+        default=0.5,
+    )
+    denoising_radius: IntProperty(
+        name="Denoising Radius",
+        description="Size of the image area that's used to denoise a pixel (higher values are smoother, but might lose detail and are slower)",
+        min=1, max=25,
+        default=8,
+        subtype="PIXEL",
+    )
+    denoising_relative_pca: BoolProperty(
+        name="Relative Filter",
+        description="When removing pixels that don't carry information, use a relative threshold instead of an absolute one (can help to reduce artifacts, but might cause detail loss around edges)",
+        default=False,
+    )
     denoising_store_passes: BoolProperty(
         name="Store Denoising Passes",
         description="Store the denoising feature passes and the noisy image. The passes adapt to the denoiser selected for rendering",

@@ -23,14 +23,9 @@ CCL_NAMESPACE_BEGIN
 
 namespace {
 
-/* The defaults of the settings the NLM denoiser had in Blender 2.9x. */
-constexpr int NLM_RADIUS = 8;
-constexpr float NLM_STRENGTH = 0.5f;
-constexpr float NLM_FEATURE_STRENGTH = 0.5f;
-
 /* Denoised in tiles of this size, with a margin of the radius: the regression stores ~200 floats
- * per pixel. */
-constexpr int NLM_TILE_SIZE = 128;
+ * per pixel (~60 MB). */
+constexpr int NLM_TILE_SIZE = 256;
 
 /* Passes of the denoising buffer of a tile (#NLMTile::buffer). */
 enum {
@@ -98,6 +93,11 @@ void mean_and_variance(
   /* Can't compute variance with single sample, just set it very high. */
   *variance = (n > 1) ? max(0.0f, (sum_squared - sum * (*mean)) / (float(n) * (n - 1))) : 1e10f;
 }
+
+/* Time spent per step, for the log. */
+struct NLMTimes {
+  double features = 0.0, color = 0.0, transform = 0.0, regression = 0.0, solve = 0.0;
+};
 
 struct NLMTile {
   /* Denoised pixels: x, y, width, height. */
@@ -251,9 +251,12 @@ void reconstruct(NLMTile &tile,
                  const NLMInput &input,
                  float *output_buffer,
                  const int output,
+                 const int radius,
                  const float nlm_k_2,
-                 const float pca_threshold)
+                 const float pca_threshold,
+                 NLMTimes &times)
 {
+  double start = time_dt();
   const int4 rect = tile.rect;
   const int4 area = tile.filter_area;
   const int num_pixels = area.z * area.w;
@@ -276,10 +279,13 @@ void reconstruct(NLMTile &tile,
                                         false,
                                         transform.data() + size_t(idx) * TRANSFORM_SIZE,
                                         rank.data() + idx,
-                                        NLM_RADIUS,
+                                        radius,
                                         pca_threshold);
     }
   }
+
+  times.transform += time_dt() - start;
+  start = time_dt();
 
   vector<float> XtWX(size_t(num_pixels) * XTWX_SIZE, 0.0f);
   vector<float3> XtWY(size_t(num_pixels) * XTWY_SIZE, zero_float3());
@@ -290,7 +296,7 @@ void reconstruct(NLMTile &tile,
   float *difference = tile.temporary.get(0);
   float *blur_difference = tile.temporary.get(tile.pass_stride);
 
-  const int r = NLM_RADIUS;
+  const int r = radius;
   for (int i = 0; i < (2 * r + 1) * (2 * r + 1); i++) {
     const int dy = i / (2 * r + 1) - r;
     const int dx = i % (2 * r + 1) - r;
@@ -329,6 +335,9 @@ void reconstruct(NLMTile &tile,
                                         0,
                                         false);
   }
+
+  times.regression += time_dt() - start;
+  start = time_dt();
 
   /* Solve (`kernel_filter_finalize`), writing to the output pass. */
   for (int y = 0; y < area.w; y++) {
@@ -374,6 +383,7 @@ void reconstruct(NLMTile &tile,
       out[3] = noisy[3];
     }
   }
+  times.solve += time_dt() - start;
 }
 
 /* Without the passes the denoiser needs, the denoised pass is the noisy one. */
@@ -446,11 +456,16 @@ bool NLMDenoiser::denoise_buffer(const BufferParams &buffer_params,
     return true;
   }
 
-  const float nlm_k_2 = powf(2.0f, mix(-5.0f, 3.0f, NLM_STRENGTH));
-  const float pca_threshold = powf(10.0f, mix(-5.0f, 3.0f, NLM_FEATURE_STRENGTH));
+  const int radius = clamp(params_.nlm_radius, 1, 25);
+  const float nlm_k_2 = powf(2.0f, mix(-5.0f, 3.0f, params_.nlm_strength));
+  const float pca_threshold =
+      params_.nlm_relative_pca ?
+          -powf(10.0f, mix(-8.0f, 0.0f, params_.nlm_feature_strength)) :
+          powf(10.0f, mix(-5.0f, 3.0f, params_.nlm_feature_strength));
   const int width = buffer_params.width;
   const int height = buffer_params.height;
   const double start_time = time_dt();
+  NLMTimes times;
 
   for (int tile_y = 0; tile_y < height; tile_y += NLM_TILE_SIZE) {
     for (int tile_x = 0; tile_x < width; tile_x += NLM_TILE_SIZE) {
@@ -467,21 +482,27 @@ bool NLMDenoiser::denoise_buffer(const BufferParams &buffer_params,
                                                         tile.filter_area.y,
                                                         tile.filter_area.z,
                                                         tile.filter_area.w),
-                                        NLM_RADIUS),
+                                        radius),
                             make_int4(0, 0, width, height));
       tile.stride = align_up(tile.rect.z - tile.rect.x, 4);
       tile.pass_stride = align_up(tile.stride * (tile.rect.w - tile.rect.y), 4);
       tile.buffer.alloc(NLM_BUFFER_NUM_PASSES * size_t(tile.pass_stride));
       tile.temporary.alloc(3 * size_t(tile.pass_stride));
 
+      double step_start = time_dt();
       prefilter_features(tile, input);
+      times.features += time_dt() - step_start;
+      step_start = time_dt();
       prefilter_color(tile, input);
-      reconstruct(tile, input, buffer, output, nlm_k_2, pca_threshold);
+      times.color += time_dt() - step_start;
+      reconstruct(tile, input, buffer, output, radius, nlm_k_2, pca_threshold, times);
     }
   }
 
-  LOG_INFO << "NLM denoised " << width << "x" << height << " in " << time_dt() - start_time
-           << " seconds.";
+  LOG_INFO << "NLM denoised " << width << "x" << height << " (radius " << radius << ") in " << time_dt() - start_time
+           << " seconds (features " << times.features << ", color " << times.color
+           << ", transform " << times.transform << ", regression " << times.regression
+           << ", solve " << times.solve << ").";
 
   render_buffers->copy_to_device();
   return true;

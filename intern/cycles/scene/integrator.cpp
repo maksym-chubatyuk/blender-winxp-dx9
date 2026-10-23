@@ -191,6 +191,10 @@ NODE_DEFINE(Integrator)
   SOCKET_BOOLEAN(denoise_use_gpu, "Denoise on GPU", true);
   SOCKET_ENUM(denoiser_quality, "Denoiser Quality", denoiser_quality_enum, DENOISER_QUALITY_HIGH);
   SOCKET_FLOAT(denoiser_upscale_factor, "Denoiser Upscale Factor", 1.0f);
+  SOCKET_INT(denoiser_nlm_radius, "Denoiser NLM Radius", 8);
+  SOCKET_FLOAT(denoiser_nlm_strength, "Denoiser NLM Strength", 0.5f);
+  SOCKET_FLOAT(denoiser_nlm_feature_strength, "Denoiser NLM Feature Strength", 0.5f);
+  SOCKET_BOOLEAN(denoiser_nlm_relative_pca, "Denoiser NLM Relative PCA", false);
 
   return type;
 }
@@ -540,6 +544,10 @@ DenoiseParams Integrator::get_denoise_params() const
   denoise_params.prefilter = denoiser_prefilter;
   denoise_params.quality = denoiser_quality;
   denoise_params.upscale_factor = denoiser_upscale_factor;
+  denoise_params.nlm_radius = denoiser_nlm_radius;
+  denoise_params.nlm_strength = denoiser_nlm_strength;
+  denoise_params.nlm_feature_strength = denoiser_nlm_feature_strength;
+  denoise_params.nlm_relative_pca = denoiser_nlm_relative_pca;
 
   return denoise_params;
 }

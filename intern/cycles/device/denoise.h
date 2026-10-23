@@ -90,6 +90,13 @@ class DenoiseParams : public Node {
   DenoiserQuality quality = DENOISER_QUALITY_HIGH;
   float upscale_factor = 1.0f;
 
+  /* NLM denoiser: size of the image area used to denoise a pixel, neighbor pixel weighting,
+   * removal of noisy feature passes, and their relative threshold. */
+  int nlm_radius = 8;
+  float nlm_strength = 0.5f;
+  float nlm_feature_strength = 0.5f;
+  bool nlm_relative_pca = false;
+
   static const NodeEnum *get_type_enum();
   static const NodeEnum *get_prefilter_enum();
   static const NodeEnum *get_quality_enum();

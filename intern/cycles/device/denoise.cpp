@@ -85,6 +85,11 @@ NODE_DEFINE(DenoiseParams)
   SOCKET_ENUM(quality, "Quality", *quality_enum, DENOISER_QUALITY_HIGH);
   SOCKET_FLOAT(upscale_factor, "Upscale Factor", 1.0f);
 
+  SOCKET_INT(nlm_radius, "NLM Radius", 8);
+  SOCKET_FLOAT(nlm_strength, "NLM Strength", 0.5f);
+  SOCKET_FLOAT(nlm_feature_strength, "NLM Feature Strength", 0.5f);
+  SOCKET_BOOLEAN(nlm_relative_pca, "NLM Relative PCA", false);
+
   return type;
 }
 

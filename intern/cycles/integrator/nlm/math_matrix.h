@@ -111,6 +111,7 @@ ccl_device_inline void math_trimatrix_add_diagonal(ccl_global float *A,
                                                    float val,
                                                    int stride)
 {
+  (void)stride; /* Only used on GPUs. */
   for (int row = 0; row < n; row++) {
     MATHS(A, row, row, stride) += val;
   }
@@ -135,6 +136,7 @@ ccl_device_inline void math_matrix_add_gramian(float *A,
 ccl_device_inline void math_trimatrix_add_gramian_strided(
     ccl_global float *A, int n, const float *ccl_restrict v, float weight, int stride)
 {
+  (void)stride; /* Only used on GPUs. */
   for (int row = 0; row < n; row++) {
     for (int col = 0; col <= row; col++) {
       atomic_add_and_fetch_float(&MATHS(A, row, col, stride), v[row] * v[col] * weight);
@@ -157,6 +159,7 @@ ccl_device_inline void math_trimatrix_add_gramian(ccl_global float *A,
 /* Transpose matrix A in place. */
 ccl_device_inline void math_matrix_transpose(ccl_global float *A, int n, int stride)
 {
+  (void)stride; /* Only used on GPUs. */
   for (int i = 0; i < n; i++) {
     for (int j = 0; j < i; j++) {
       float temp = MATS(A, n, i, j, stride);
@@ -173,6 +176,7 @@ ccl_device_inline void math_matrix_transpose(ccl_global float *A, int n, int str
  * Also, only the lower triangular part of A is ever accessed. */
 ccl_device void math_trimatrix_cholesky(ccl_global float *A, int n, int stride)
 {
+  (void)stride; /* Only used on GPUs. */
   for (int row = 0; row < n; row++) {
     for (int col = 0; col <= row; col++) {
       float sum_col = MATHS(A, row, col, stride);
@@ -242,6 +246,7 @@ ccl_device void math_matrix_jacobi_eigendecomposition(float *A,
                                                       int n,
                                                       int v_stride)
 {
+  (void)v_stride; /* Only used on GPUs. */
   const float singular_epsilon = 1e-9f;
 
   for (int row = 0; row < n; row++) {

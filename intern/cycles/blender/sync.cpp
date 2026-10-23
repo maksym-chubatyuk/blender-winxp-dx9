@@ -584,6 +584,10 @@ void BlenderSync::sync_integrator(blender::ViewLayer &b_view_layer,
     integrator->set_denoiser_prefilter(denoise_params.prefilter);
     integrator->set_denoiser_quality(denoise_params.quality);
     integrator->set_denoiser_upscale_factor(denoise_params.upscale_factor);
+    integrator->set_denoiser_nlm_radius(denoise_params.nlm_radius);
+    integrator->set_denoiser_nlm_strength(denoise_params.nlm_strength);
+    integrator->set_denoiser_nlm_feature_strength(denoise_params.nlm_feature_strength);
+    integrator->set_denoiser_nlm_relative_pca(denoise_params.nlm_relative_pca);
   }
 
   /* UPDATE_NONE as we don't want to tag the integrator as modified (this was done by the
@@ -1212,6 +1216,17 @@ DenoiseParams BlenderSync::get_denoise_params(blender::Scene &b_scene,
    * OpenImageDenoise. */
   if (denoising.type == DENOISER_OPENIMAGEDENOISE && !openimagedenoise_supported()) {
     denoising.type = DENOISER_NLM;
+  }
+
+  /* NLM settings of the view layer, like in Blender 2.9x. */
+  if (b_view_layer) {
+    blender::PointerRNA view_layer_rna_ptr = RNA_pointer_create_id_subdata(
+        b_scene.id, blender::RNA_ViewLayer, b_view_layer);
+    blender::PointerRNA crl = RNA_pointer_get(&view_layer_rna_ptr, "cycles");
+    denoising.nlm_radius = get_int(crl, "denoising_radius");
+    denoising.nlm_strength = get_float(crl, "denoising_strength");
+    denoising.nlm_feature_strength = get_float(crl, "denoising_feature_strength");
+    denoising.nlm_relative_pca = get_boolean(crl, "denoising_relative_pca");
   }
 
   switch (input_passes) {
