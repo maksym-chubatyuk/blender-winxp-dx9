@@ -367,6 +367,21 @@ void D3D9Batch::draw(int v_first, int v_count, int i_first, int i_count)
   const bool close_loop = prim_type == GPU_PRIM_LINE_LOOP && v_count > 2 && ib == nullptr;
 
   const bool select_output = shader->select_output();
+  /* `BLENDER_D3D9_SELECT_TRACE`: log each selection draw before it runs (a GPU hang leaves the
+   * culprit last in the log). */
+  static const bool select_trace = getenv("BLENDER_D3D9_SELECT_TRACE") != nullptr;
+  if (select_output && select_trace) {
+    fprintf(stderr,
+            "select draw %s type %d prims %u first %d instances %d+%d%s\n",
+            shader->name_get().c_str(),
+            int(type),
+            prim_len,
+            v_first,
+            i_first,
+            i_count,
+            lines_adjacency ? " (adjacency)" : "");
+    fflush(stderr);
+  }
   if (select_output && !ctx->select_draw_begin()) {
     return;
   }
