@@ -7,8 +7,8 @@
  * WIRE.
  *
  * D3D9 differences:
- * - SOLID: back faces are discarded from the facing of the flat triangle computed per vertex
- *   (ps_2_0 has no `gl_FrontFacing`).
+ * - SOLID: back faces aren't discarded (no `gl_FrontFacing` in ps_2_0, and discarding pixels in
+ *   selection passes hung the Radeon 9600): the depth test hides them, they show in X-ray.
  * - OUTLINE: the lines with adjacency are drawn as lines carrying the 4 positions (the backend
  *   expands them), silhouette edges are 1 pixel lines.
  * - WIRE: custom shape wires are 1 pixel lines, the bone arrows aren't supported.
@@ -48,10 +48,6 @@ struct VertIn {
 struct VertOut {
   float4 position : POSITION;
   float4 color : TEXCOORD0;
-#ifdef SOLID
-  /* Negative for back faces. */
-  float facing : TEXCOORD1;
-#endif
   SELECT_VARYING
 };
 
@@ -69,8 +65,6 @@ VertOut vert(VertIn v)
                   sign(det);
   float3 vs_N = drw_mat_mul3(view_buf, DRW_VIEWMAT, normal);
   float3 vs_P = world_to_view(bone_point(m, v.pos));
-  /* The facing of a flat triangle is the same for all its points. */
-  o.facing = is_persp() ? -dot(vs_N, vs_P) : vs_N.z;
   vs_N = normalize(vs_N);
 
   /* Do lighting at an angle to avoid flat shading on front facing bone. */
@@ -155,10 +149,6 @@ VertOut vert(VertIn v)
 FragOut frag(VertOut v)
 {
   FragOut o;
-#ifdef SOLID
-  /* Manual back-face culling: needed in X-ray and for inverted bone matrices. */
-  clip(v.facing);
-#endif
   o.color = v.color;
   o.line_output = float4(0.0, 0.0, 0.0, 0.0);
 #ifdef SELECT
