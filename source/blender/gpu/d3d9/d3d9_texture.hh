@@ -143,6 +143,8 @@ class D3D9Texture : public Texture {
   IDirect3DSurface9 *depth_surface_ = nullptr;
   bool is_render_target_ = false;
   bool filterable_ = true;
+  /** The device refused to create the texture: don't try again on every use. */
+  bool creation_failed_ = false;
   /** Texture views share the resource of their source. */
   D3D9Texture *source_ = nullptr;
   int view_mip_offset_ = 0;

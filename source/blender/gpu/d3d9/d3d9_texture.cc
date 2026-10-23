@@ -468,6 +468,9 @@ bool D3D9Texture::ensure_resource(bool render_target)
   }
 
   const bool has_resource = tex2d_ || cube_ || volume_;
+  if (!has_resource && creation_failed_ && !render_target) {
+    return false;
+  }
   if (has_resource) {
     if (render_target && !is_render_target_) {
       return convert_to_render_target();
@@ -514,7 +517,20 @@ bool D3D9Texture::ensure_resource(bool render_target)
                                         &tex2d_,
                                         nullptr);
   }
+  /* `BLENDER_D3D9_EMULATE_R300`: fail like the Radeon 9x00 driver does for managed float textures
+   * of non power of two sizes, to reproduce its code paths elsewhere. */
+  static const bool emulate_r300 = getenv("BLENDER_D3D9_EMULATE_R300") != nullptr;
+  if (emulate_r300 && SUCCEEDED(hr) && !render_target && !from_cache &&
+      ELEM(device_format_.kind, D3D9TexelKind::HALF, D3D9TexelKind::FLOAT) &&
+      !(is_power_of_2_i(device_w_) && is_power_of_2_i(device_h_)))
+  {
+    d3d9_release(tex2d_);
+    d3d9_release(cube_);
+    d3d9_release(volume_);
+    hr = D3DERR_INVALIDCALL;
+  }
   if (FAILED(hr)) {
+    creation_failed_ = true;
     CLOG_ERROR(&LOG,
                "Creating texture \"%s\" (%dx%d, format %d, %s) failed (0x%08lx)",
                name_.c_str(),
@@ -523,6 +539,20 @@ bool D3D9Texture::ensure_resource(bool render_target)
                int(device_format_.format),
                render_target ? "render target" : "managed",
                (unsigned long)hr);
+    /* Where it is used from: the stack values pointing into the executable. */
+    static int stacks_printed = 0;
+    if (stacks_printed++ < 5) {
+      const uintptr_t image_start = uintptr_t(GetModuleHandleA(nullptr));
+      const uintptr_t *sp = reinterpret_cast<const uintptr_t *>(__builtin_frame_address(0));
+      fprintf(stderr, "d3d9: failed texture used from:");
+      for (int i = 0, n = 0; i < 2048 && n < 40; i++) {
+        if (sp[i] > image_start && sp[i] < image_start + 0x6000000) {
+          fprintf(stderr, " %08lx", (unsigned long)sp[i]);
+          n++;
+        }
+      }
+      fprintf(stderr, "\n");
+    }
     return false;
   }
   is_render_target_ = render_target;
