@@ -27,6 +27,9 @@
 #  ifdef WIN32
 #    include <float.h>
 #    include <windows.h>
+#    ifdef __MINGW32__
+#      include <tlhelp32.h>
+#    endif
 
 #    include "BLI_winstuff.h"
 
@@ -170,6 +173,76 @@ static void sig_handle_crash_fn(int signum)
   std::call_once(crash_func_once, crash_func);
 }
 #  else
+#    ifdef __MINGW32__
+/* XP port: print the values on a stack that point into the executable (a superset of the call
+ * chain), without allocating. */
+static void xp_print_stack_values(const uintptr_t *sp)
+{
+  char line[16];
+  DWORD written;
+  const HANDLE err = GetStdHandle(STD_ERROR_HANDLE);
+  const IMAGE_DOS_HEADER *dos = (const IMAGE_DOS_HEADER *)GetModuleHandleA(nullptr);
+  const IMAGE_NT_HEADERS *nt = (const IMAGE_NT_HEADERS *)((const char *)dos + dos->e_lfanew);
+  const uintptr_t image_start = uintptr_t(dos);
+  const uintptr_t image_end = image_start + nt->OptionalHeader.SizeOfImage;
+  MEMORY_BASIC_INFORMATION mbi;
+  if (VirtualQuery(sp, &mbi, sizeof(mbi))) {
+    const uintptr_t *end = (const uintptr_t *)((const char *)mbi.BaseAddress + mbi.RegionSize);
+    for (int n = 0; sp < end && n < 300; sp++) {
+      if (*sp >= image_start && *sp < image_end) {
+        const int len = snprintf(line, sizeof(line), " %08lx", (unsigned long)*sp);
+        WriteFile(err, line, DWORD(len), &written, nullptr);
+        n++;
+      }
+    }
+  }
+  WriteFile(err, "\n", 1, &written, nullptr);
+}
+
+/* XP port: there is no working debugger on the XP machine. With `XP_THREAD_DUMP_AFTER=<seconds>`
+ * the stacks of all threads are printed after that many seconds, to find where Blender hangs. */
+static DWORD WINAPI xp_thread_dump(LPVOID seconds)
+{
+  Sleep(DWORD(uintptr_t(seconds)) * 1000);
+  const HANDLE err = GetStdHandle(STD_ERROR_HANDLE);
+  const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+  THREADENTRY32 entry;
+  entry.dwSize = sizeof(entry);
+  for (BOOL found = Thread32First(snapshot, &entry); found; found = Thread32Next(snapshot, &entry))
+  {
+    if (entry.th32OwnerProcessID != GetCurrentProcessId() ||
+        entry.th32ThreadID == GetCurrentThreadId())
+    {
+      continue;
+    }
+    const HANDLE thread = OpenThread(
+        THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, entry.th32ThreadID);
+    if (thread == nullptr) {
+      continue;
+    }
+    if (SuspendThread(thread) != DWORD(-1)) {
+      CONTEXT context = {};
+      context.ContextFlags = CONTEXT_CONTROL;
+      if (GetThreadContext(thread, &context)) {
+        char line[64];
+        DWORD written;
+        const int len = snprintf(line,
+                                 sizeof(line),
+                                 "Thread %lu at 0x%08lx, stack:",
+                                 (unsigned long)entry.th32ThreadID,
+                                 (unsigned long)context.Eip);
+        WriteFile(err, line, DWORD(len), &written, nullptr);
+        xp_print_stack_values((const uintptr_t *)context.Esp);
+      }
+      ResumeThread(thread);
+    }
+    CloseHandle(thread);
+  }
+  CloseHandle(snapshot);
+  return 0;
+}
+#    endif
+
 extern LONG WINAPI windows_exception_handler(EXCEPTION_POINTERS *ExceptionInfo)
 {
   /* If this is a stack overflow then we can't walk the stack, so just try to show
@@ -206,24 +279,7 @@ extern LONG WINAPI windows_exception_handler(EXCEPTION_POINTERS *ExceptionInfo)
                          rec->NumberParameters > 1 ? (void *)rec->ExceptionInformation[1] :
                                                      nullptr);
       WriteFile(err, line, DWORD(len), &written, nullptr);
-      const IMAGE_DOS_HEADER *dos = (const IMAGE_DOS_HEADER *)GetModuleHandleA(nullptr);
-      const IMAGE_NT_HEADERS *nt = (const IMAGE_NT_HEADERS *)((const char *)dos + dos->e_lfanew);
-      const uintptr_t image_start = uintptr_t(dos);
-      const uintptr_t image_end = image_start + nt->OptionalHeader.SizeOfImage;
-      const uintptr_t *sp = (const uintptr_t *)ExceptionInfo->ContextRecord->Esp;
-      MEMORY_BASIC_INFORMATION mbi;
-      if (VirtualQuery(sp, &mbi, sizeof(mbi))) {
-        const uintptr_t *end = (const uintptr_t *)((const char *)mbi.BaseAddress +
-                                                   mbi.RegionSize);
-        for (int n = 0; sp < end && n < 300; sp++) {
-          if (*sp >= image_start && *sp < image_end) {
-            len = snprintf(line, sizeof(line), " %08lx", (unsigned long)*sp);
-            WriteFile(err, line, DWORD(len), &written, nullptr);
-            n++;
-          }
-        }
-      }
-      WriteFile(err, "\n", 1, &written, nullptr);
+      xp_print_stack_values((const uintptr_t *)ExceptionInfo->ContextRecord->Esp);
     }
 #    endif
     auto crash_func = [&]() {
@@ -288,6 +344,12 @@ void main_signal_setup()
     signal(SIGSEGV, sig_handle_crash_fn);
 #  endif
   }
+
+#  if defined(WIN32) && defined(__MINGW32__)
+  if (const char *seconds = getenv("XP_THREAD_DUMP_AFTER")) {
+    CreateThread(nullptr, 0, xp_thread_dump, (LPVOID)uintptr_t(atoi(seconds)), 0, nullptr);
+  }
+#  endif
 
 #  ifdef WIN32
   /* Prevent any error mode dialogs from hanging the application. */
