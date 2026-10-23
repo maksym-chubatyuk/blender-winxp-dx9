@@ -570,29 +570,6 @@ bool D3D9Texture::ensure_resource(bool render_target)
     d3d9_release(volume_);
     hr = D3DERR_INVALIDCALL;
   }
-  /* The Radeon 9x00 driver has no managed float textures of non power of two sizes (render
-   * results, images), but render targets of any size: keep those in video memory as render
-   * targets, uploads go through system memory surfaces. */
-  if (FAILED(hr) && !render_target && type_ == GPU_TEXTURE_2D &&
-      ELEM(device_format_.kind, D3D9TexelKind::HALF, D3D9TexelKind::FLOAT))
-  {
-    const int64_t bytes = int64_t(device_w_) * device_h_ * d3d9_texel_size(device_format_);
-    if (!d3d9_vram_budget_exceeded(bytes) &&
-        SUCCEEDED(device->CreateTexture(device_w_,
-                                        device_h_,
-                                        1,
-                                        D3DUSAGE_RENDERTARGET,
-                                        device_format_.format,
-                                        D3DPOOL_DEFAULT,
-                                        &tex2d_,
-                                        nullptr)))
-    {
-      hr = D3D_OK;
-      render_target = true;
-      vram_bytes_ = bytes;
-      d3d9_vram_bytes += bytes;
-    }
-  }
   if (FAILED(hr)) {
     creation_failed_ = true;
     CLOG_ERROR(&LOG,
