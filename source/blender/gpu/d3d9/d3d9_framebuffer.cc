@@ -207,6 +207,10 @@ void D3D9FrameBuffer::apply_state(const bool blending, const bool no_color_write
     }
     else {
       IDirect3DSurface9 *depth = depth_surface();
+      /* A surface can't be bound to two slots: clear the others before moving one to another. */
+      for (int i = 1; i < max_targets; i++) {
+        device->SetRenderTarget(i, nullptr);
+      }
       for (int i = 0; i < max_targets; i++) {
         IDirect3DSurface9 *surface = (depth_only_ || (i > 0 && single_target_)) ?
                                          nullptr :
@@ -369,11 +373,13 @@ void D3D9FrameBuffer::clear_attachment(GPUAttachmentType type, const double4 cle
   if (surface == nullptr) {
     return;
   }
+  /* Unbind the other targets first: a surface still bound to another slot can't be bound to the
+   * first one (the call fails and the previous first target would be cleared instead). */
   const int max_targets = clamp_i(int(D3D9Backend::get()->caps.NumSimultaneousRTs), 1, 4);
-  device->SetRenderTarget(0, surface);
   for (int i = 1; i < max_targets; i++) {
     device->SetRenderTarget(i, nullptr);
   }
+  D3D9_CHECK(device->SetRenderTarget(0, surface));
   surface->Release();
   clear_full_viewport(device, D3DCLEAR_TARGET, to_d3d9_color(clear_value), 1.0f, 0);
   tag_dirty();
