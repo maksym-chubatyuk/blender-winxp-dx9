@@ -70,6 +70,8 @@ Span<gpu::Batch *> DRW_cache_mesh_surface_shaded_get(Object *ob,
  * Return list of batches with length equal to `max(1, totcol)`.
  */
 Span<gpu::Batch *> DRW_cache_mesh_surface_texpaint_get(Object *ob);
+/** With the tangents of the active UV map (attribute `at`). */
+Span<gpu::Batch *> DRW_cache_mesh_surface_texpaint_tangent_get(Object *ob);
 gpu::Batch *DRW_cache_mesh_surface_texpaint_single_get(Object *ob);
 gpu::Batch *DRW_cache_mesh_surface_vertpaint_get(Object *ob);
 gpu::Batch *DRW_cache_mesh_surface_sculptcolors_get(Object *ob);

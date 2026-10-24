@@ -29,6 +29,8 @@ float4 mat_params;
 #endif
 #ifdef CUTOUT
 // d3d9-alpha-test
+/* One-hot selection of the channel of `base_tx` holding the coverage. */
+float4 coverage_channel;
 #endif
 #ifdef TEXTURE
 sampler2D base_tx : register(s0);
@@ -86,7 +88,7 @@ float4 frag(VertOut v) : COLOR0
   float4 result = float4(mechazyiu_distance_encode(length(v.to_light)), 1.0);
 #  endif
 #  ifdef CUTOUT
-  result.a = tex2D(base_tx, v.uv).a;
+  result.a = dot(tex2D(base_tx, v.uv), coverage_channel);
 #  endif
   return result;
 #endif

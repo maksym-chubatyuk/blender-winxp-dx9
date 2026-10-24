@@ -761,6 +761,18 @@ Span<gpu::Batch *> DRW_mesh_batch_cache_get_surface_texpaint(Object &object, Mes
   return cache.surface_per_mat;
 }
 
+Span<gpu::Batch *> DRW_mesh_batch_cache_get_surface_texpaint_tangent(Object &object, Mesh &mesh)
+{
+  MeshBatchCache &cache = *mesh_batch_cache_get(mesh);
+  texpaint_request_active_uv(cache, object, mesh);
+  const StringRef active_uv_map = editmesh_final_or_this(object, mesh).active_or_default_uv_map_name();
+  if (!active_uv_map.is_empty()) {
+    cache.cd_needed.tan.add_as(active_uv_map);
+  }
+  mesh_batch_cache_request_surface_batches(mesh, cache);
+  return cache.surface_per_mat;
+}
+
 gpu::Batch *DRW_mesh_batch_cache_get_surface_texpaint_single(Object &object, Mesh &mesh)
 {
   MeshBatchCache &cache = *mesh_batch_cache_get(mesh);

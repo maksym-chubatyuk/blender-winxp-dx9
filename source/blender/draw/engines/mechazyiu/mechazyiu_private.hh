@@ -41,6 +41,19 @@ namespace mechazyiu {
 /** \name Materials
  * \{ */
 
+/** An image read by a material: one of its channels (scalar maps) or its color. */
+struct MapTexture {
+  gpu::Texture **texture = nullptr;
+  GPUSamplerState sampler = GPUSamplerState::default_sampler();
+  /** 0 to 3: red to alpha. */
+  int channel = 0;
+
+  bool valid() const
+  {
+    return texture && *texture;
+  }
+};
+
 /** Surface parameters of a material, read from its node tree (Principled BSDF and the common
  * simple shaders). Nodes the engine doesn't handle use their input values. */
 struct MaterialData {
@@ -56,6 +69,20 @@ struct MaterialData {
   GPUSamplerState sampler = GPUSamplerState::default_sampler();
   /** The alpha of the image multiplies `alpha` (the image's alpha output is linked to it). */
   bool texture_alpha = false;
+  /** Images of the other inputs (tangent space normal map, roughness, metallic, the coverage of
+   * cutouts: the alpha input linked to an image). */
+  MapTexture normal_map;
+  float normal_strength = 1.0f;
+  MapTexture roughness_map;
+  MapTexture metallic_map;
+  MapTexture coverage_map;
+
+  /** More than the base color image: the G-buffer variant reading every map. */
+  bool has_maps() const
+  {
+    return normal_map.valid() || roughness_map.valid() || metallic_map.valid() ||
+           (coverage_map.valid() && coverage_map.texture != texture);
+  }
   bool backface_culling = false;
   /** Material render method "Blended". */
   bool blended = false;
@@ -71,7 +98,7 @@ struct MaterialData {
   /** Image alpha cutouts: alpha tested at 0.5, like the games of the time. */
   bool cutout() const
   {
-    return !transparent() && texture_alpha;
+    return !transparent() && coverage_map.valid();
   }
 };
 

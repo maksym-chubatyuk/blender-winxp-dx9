@@ -118,14 +118,14 @@ static const bNode *input_image_node(const bNode &node, StringRef identifier)
   return &image_node;
 }
 
-static void material_texture_set(MaterialData &data, const bNode &image_node)
+static void map_texture_set(MapTexture &map, const bNode &image_node)
 {
   Image *image = reinterpret_cast<Image *>(image_node.id);
   const NodeTexImage *storage = static_cast<const NodeTexImage *>(image_node.storage);
   ImageUser iuser = storage->iuser;
-  data.texture = BKE_image_get_gpu_material_texture(image, &iuser, false).texture;
+  map.texture = BKE_image_get_gpu_material_texture(image, &iuser, false).texture;
 
-  GPUSamplerState &sampler = data.sampler;
+  GPUSamplerState &sampler = map.sampler;
   sampler = GPUSamplerState::default_sampler();
   const bool use_filter = storage->interpolation != SHD_INTERP_CLOSEST;
   sampler.set_filtering_flag_from_test(GPU_SAMPLER_FILTERING_LINEAR, use_filter);
@@ -148,6 +148,85 @@ static void material_texture_set(MaterialData &data, const bNode &image_node)
   sampler.extend_yz = extend;
 }
 
+static void material_texture_set(MaterialData &data, const bNode &image_node)
+{
+  MapTexture map;
+  map_texture_set(map, image_node);
+  data.texture = map.texture;
+  data.sampler = map.sampler;
+}
+
+/** Image texture node of an output socket (not tiled), or null. */
+static const bNode *image_node_of(const bNodeSocket *from)
+{
+  if (from == nullptr || from->owner_node().type_legacy != SH_NODE_TEX_IMAGE) {
+    return nullptr;
+  }
+  const bNode &node = from->owner_node();
+  const Image *image = reinterpret_cast<const Image *>(node.id);
+  return (image && image->source != IMA_SRC_TILED) ? &node : nullptr;
+}
+
+/**
+ * Scalar input read from an image: its color (red), its alpha, or a channel separated by a
+ * Separate Color node (packed maps). False when not linked to an image.
+ */
+static bool scalar_map_read(const bNode &node, StringRef identifier, MapTexture &r_map)
+{
+  const bNodeSocket *from = input_link_get(input_find(node, identifier));
+  if (from == nullptr) {
+    return false;
+  }
+  int channel = 0;
+  if (ELEM(from->owner_node().type_legacy, SH_NODE_SEPARATE_COLOR, SH_NODE_SEPRGB_LEGACY)) {
+    const bNode &separate = from->owner_node();
+    if (separate.type_legacy == SH_NODE_SEPARATE_COLOR && separate.storage &&
+        static_cast<const NodeCombSepColor *>(separate.storage)->mode != NODE_COMBSEP_COLOR_RGB)
+    {
+      return false;
+    }
+    const StringRef name = from->identifier;
+    channel = (name == "Green" || name == "G") ? 1 : (name == "Blue" || name == "B") ? 2 : 0;
+    from = input_link_get(input_find(separate, separate.type_legacy == SH_NODE_SEPARATE_COLOR ?
+                                                   "Color" :
+                                                   "Image"));
+    if (from == nullptr || StringRef(from->identifier) != "Color") {
+      return false;
+    }
+  }
+  else if (StringRef(from->identifier) == "Alpha") {
+    channel = 3;
+  }
+  const bNode *image_node = image_node_of(from);
+  if (image_node == nullptr) {
+    return false;
+  }
+  map_texture_set(r_map, *image_node);
+  r_map.channel = channel;
+  return true;
+}
+
+/** Tangent space normal map: Normal Map node with an image. */
+static void normal_map_read(MaterialData &data, const bNode &node)
+{
+  const bNodeSocket *from = input_link_get(input_find(node, "Normal"));
+  if (from == nullptr || from->owner_node().type_legacy != SH_NODE_NORMAL_MAP) {
+    return;
+  }
+  const bNode &normal_map = from->owner_node();
+  const NodeShaderNormalMap *storage = static_cast<const NodeShaderNormalMap *>(
+      normal_map.storage);
+  if (storage && storage->space != SHD_SPACE_TANGENT) {
+    return;
+  }
+  const bNode *image_node = image_node_of(input_link_get(input_find(normal_map, "Color")));
+  if (image_node == nullptr) {
+    return;
+  }
+  map_texture_set(data.normal_map, *image_node);
+  data.normal_strength = input_float(normal_map, "Strength", 1.0f);
+}
+
 static void base_color_read(MaterialData &data, const bNode &node, StringRef identifier)
 {
   if (const bNode *image_node = input_image_node(node, identifier)) {
@@ -160,32 +239,19 @@ static void base_color_read(MaterialData &data, const bNode &node, StringRef ide
 }
 
 /**
- * Alpha input: its value, or the alpha of an image linked to it. One image per material: the
- * base color's, or an image used only for the alpha.
+ * Alpha input: its value, or an image linked to it (`coverage_map`, also `texture_alpha` when it
+ * is the alpha of the base color's image).
  */
 static void alpha_read(MaterialData &data, const bNode &node, StringRef identifier)
 {
-  const bNodeSocket *socket = input_find(node, identifier);
   data.alpha = input_float(node, identifier, 1.0f);
-  const bNodeSocket *from = input_link_get(socket);
-  if (from == nullptr) {
+  MapTexture coverage;
+  if (!scalar_map_read(node, identifier, coverage)) {
     return;
   }
-  const bNode &from_node = from->owner_node();
-  if (from_node.type_legacy != SH_NODE_TEX_IMAGE || StringRef(from->identifier) != "Alpha") {
-    return;
-  }
-  MaterialData alpha_image;
-  material_texture_set(alpha_image, from_node);
-  if (data.texture == nullptr) {
-    /* The image only gives the alpha: its color must not tint the base color. That needs a
-     * second image, not supported. */
-    return;
-  }
-  if (alpha_image.texture == data.texture) {
-    data.texture_alpha = true;
-    data.alpha = 1.0f;
-  }
+  data.coverage_map = coverage;
+  data.alpha = 1.0f;
+  data.texture_alpha = coverage.channel == 3 && coverage.texture == data.texture;
 }
 
 /** Read the BSDF of a shader socket (output socket of a shader node). */
@@ -201,6 +267,13 @@ static MaterialData shader_read(const bNodeSocket *shader, int depth)
       base_color_read(data, node, "Base Color");
       data.metallic = input_float(node, "Metallic", 0.0f);
       data.roughness = input_float(node, "Roughness", 0.5f);
+      if (scalar_map_read(node, "Metallic", data.metallic_map)) {
+        data.metallic = 1.0f;
+      }
+      if (scalar_map_read(node, "Roughness", data.roughness_map)) {
+        data.roughness = 1.0f;
+      }
+      normal_map_read(data, node);
       const float ior = input_float(node, "IOR", 1.5f);
       const float level = input_float(node, "Specular IOR Level", 0.5f);
       data.f0 = math::square((ior - 1.0f) / (ior + 1.0f)) * 2.0f * level;
@@ -256,6 +329,7 @@ static MaterialData shader_read(const bNodeSocket *shader, int depth)
           MaterialData coverage = data;
           alpha_read(coverage, node, "Fac");
           data.texture_alpha = coverage.texture_alpha;
+          data.coverage_map = coverage.coverage_map;
           data.alpha *= coverage.alpha;
         }
         else {

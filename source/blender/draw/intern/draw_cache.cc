@@ -228,6 +228,13 @@ Span<gpu::Batch *> DRW_cache_mesh_surface_texpaint_get(Object *ob)
                                                    DRW_object_get_data_for_drawing<Mesh>(*ob));
 }
 
+Span<gpu::Batch *> DRW_cache_mesh_surface_texpaint_tangent_get(Object *ob)
+{
+  BLI_assert(ob->type == OB_MESH);
+  return DRW_mesh_batch_cache_get_surface_texpaint_tangent(
+      *ob, DRW_object_get_data_for_drawing<Mesh>(*ob));
+}
+
 gpu::Batch *DRW_cache_mesh_surface_texpaint_single_get(Object *ob)
 {
   BLI_assert(ob->type == OB_MESH);

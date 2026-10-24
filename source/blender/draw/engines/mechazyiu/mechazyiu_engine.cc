@@ -102,11 +102,13 @@ constexpr int64_t view_bytes_per_pixel = 8 + 4;
 
 class ShaderCache {
  public:
-  gpu::StaticShader gbuffer[2 /*texture*/][2 /*flip*/][2 /*single target*/] = {
+  gpu::StaticShader gbuffer[3 /*SurfaceKind*/][2 /*flip*/][2 /*single target*/] = {
       {{{"mechazyiu_gbuffer"}, {"mechazyiu_gbuffer_single"}},
        {{"mechazyiu_gbuffer_flip"}, {"mechazyiu_gbuffer_flip_single"}}},
       {{{"mechazyiu_gbuffer_texture"}, {"mechazyiu_gbuffer_texture_single"}},
-       {{"mechazyiu_gbuffer_texture_flip"}, {"mechazyiu_gbuffer_texture_flip_single"}}}};
+       {{"mechazyiu_gbuffer_texture_flip"}, {"mechazyiu_gbuffer_texture_flip_single"}}},
+      {{{"mechazyiu_gbuffer_maps"}, {"mechazyiu_gbuffer_maps_single"}},
+       {{"mechazyiu_gbuffer_maps_flip"}, {"mechazyiu_gbuffer_maps_flip_single"}}}};
   gpu::StaticShader base = {"mechazyiu_base"};
   gpu::StaticShader light[2 /*blend*/][light_type_len] = {
       {{"mechazyiu_light_point"},
@@ -291,6 +293,15 @@ struct BlendedDraw {
   float depth = 0.0f;
 };
 
+/** G-buffer shader of a surface: plain, base color image, all the images (needs tangents). */
+enum SurfaceKind { SURFACE_PLAIN = 0, SURFACE_TEXTURE, SURFACE_MAPS };
+
+/** One-hot selection of an image channel. */
+static float4 channel_select(int channel)
+{
+  return float4(channel == 0, channel == 1, channel == 2, channel == 3);
+}
+
 /** What the GPU can do, chosen paths. */
 struct Capabilities {
   /** Floating point render targets (16 and 32 bit): required. */
@@ -344,7 +355,7 @@ class Instance : public DrawEngine {
   Vector<LightData> lights_;
   Vector<MaterialData> materials_;
   Map<const Material *, int> material_indices_;
-  /** G-buffer sub-passes of each material: [index][textured][back faces]. */
+  /** G-buffer sub-passes of each material: [index][SurfaceKind][back faces]. */
   Map<int3, PassMain::Sub *> material_passes_;
   Set<gpu::Texture *> textures_;
   int64_t texture_bytes_ = 0;
@@ -420,6 +431,8 @@ class Instance : public DrawEngine {
   /** Lights without shadow read this instead of the mask, and the shadow masks instead of the
    * transparent casters' maps when there are none. */
   Texture white_tx_ = {"mechazyiu.white"};
+  /** Normal maps of materials without one: the unchanged normal. */
+  Texture flat_normal_tx_ = {"mechazyiu.flat_normal"};
   gpu::Texture *translucent_depth_src_ = nullptr;
   gpu::Texture *transmittance_src_ = nullptr;
   TilePlan plan_;
@@ -628,27 +641,35 @@ class Instance : public DrawEngine {
   {
     return material_indices_.lookup_or_add_cb(material, [&]() {
       MaterialData data = material_data_get(material);
-      if (data.texture && *data.texture && textures_.add(*data.texture)) {
-        texture_bytes_ += int64_t(GPU_texture_width(*data.texture)) *
-                          GPU_texture_height(*data.texture) * 4 * 4 / 3;
+      for (gpu::Texture **texture : {data.texture,
+                                     data.normal_map.texture,
+                                     data.roughness_map.texture,
+                                     data.metallic_map.texture,
+                                     data.coverage_map.texture})
+      {
+        if (texture && *texture && textures_.add(*texture)) {
+          texture_bytes_ += int64_t(GPU_texture_width(*texture)) * GPU_texture_height(*texture) *
+                            4 * 4 / 3;
+        }
       }
       materials_.append(data);
       return int(materials_.size() - 1);
     });
   }
 
-  PassMain::Sub &material_pass_get(int index, bool textured, bool back)
+  PassMain::Sub &material_pass_get(int index, SurfaceKind kind, bool back)
   {
-    return *material_passes_.lookup_or_add_cb(int3(index, textured, back), [&]() {
+    return *material_passes_.lookup_or_add_cb(int3(index, kind, back), [&]() {
       const MaterialData &data = materials_[index];
       PassMain::Sub &sub = gbuffer_ps_.sub("mechazyiu.material");
       /* Cutouts: only the pixels their prepass kept. */
-      const DRWState depth_test = data.cutout() && textured ? DRW_STATE_DEPTH_EQUAL :
-                                                              DRW_STATE_DEPTH_LESS_EQUAL;
+      const DRWState depth_test = data.cutout() && kind != SURFACE_PLAIN ?
+                                      DRW_STATE_DEPTH_EQUAL :
+                                      DRW_STATE_DEPTH_LESS_EQUAL;
       sub.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_DEPTH | depth_test |
                     (back ? DRW_STATE_CULL_FRONT : DRW_STATE_CULL_BACK));
       const bool single = !caps_.multiple_targets;
-      sub.shader_set(ShaderCache::get().gbuffer[textured][back][single].get());
+      sub.shader_set(ShaderCache::get().gbuffer[kind][back][single].get());
       if (single) {
         sub.push_constant("gbuffer_target", &gbuffer_target_);
       }
@@ -657,8 +678,30 @@ class Instance : public DrawEngine {
       sub.push_constant(
           "mat_params",
           float4(data.metallic, math::clamp(data.roughness, 0.045f, 1.0f), data.f0, table_index));
-      if (textured) {
-        sub.bind_texture("base_tx", data.texture, data.sampler);
+      if (kind != SURFACE_PLAIN) {
+        if (data.texture && *data.texture) {
+          sub.bind_texture("base_tx", data.texture, data.sampler);
+        }
+        else {
+          /* Cutouts of an image used only for the alpha. */
+          sub.bind_texture("base_tx", &white_tx_);
+        }
+      }
+      if (kind == SURFACE_MAPS) {
+        auto bind_map = [&](const char *name, const MapTexture &map, Texture &fallback) {
+          if (map.valid()) {
+            sub.bind_texture(name, map.texture, map.sampler);
+          }
+          else {
+            sub.bind_texture(name, &fallback);
+          }
+        };
+        bind_map("normal_tx", data.normal_map, flat_normal_tx_);
+        bind_map("roughness_tx", data.roughness_map, white_tx_);
+        bind_map("metallic_tx", data.metallic_map, white_tx_);
+        sub.push_constant("roughness_channel", channel_select(data.roughness_map.channel));
+        sub.push_constant("metallic_channel", channel_select(data.metallic_map.channel));
+        sub.push_constant("mat_maps", float4(data.normal_strength, 0.0f, 0.0f, 0.0f));
       }
       return &sub;
     });
@@ -673,7 +716,8 @@ class Instance : public DrawEngine {
       sub.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_DEPTH | DRW_STATE_DEPTH_LESS_EQUAL |
                     (data.backface_culling ? DRW_STATE_CULL_BACK : DRWState(0)));
       sub.shader_set(ShaderCache::get().alpha_prepass.get());
-      sub.bind_texture("base_tx", data.texture, data.sampler);
+      sub.bind_texture("base_tx", data.coverage_map.texture, data.coverage_map.sampler);
+      sub.push_constant("coverage_channel", channel_select(data.coverage_map.channel));
       return &sub;
     });
   }
@@ -686,7 +730,8 @@ class Instance : public DrawEngine {
       PassMain::Sub &sub = shadow_ps_[ortho].sub("mechazyiu.shadow_cutout");
       sub.shader_set(ShaderCache::get().shadow_cutout[ortho].get());
       sub.push_constant("shadow_light", &shadow_light_);
-      sub.bind_texture("base_tx", data.texture, data.sampler);
+      sub.bind_texture("base_tx", data.coverage_map.texture, data.coverage_map.sampler);
+      sub.push_constant("coverage_channel", channel_select(data.coverage_map.channel));
       return &sub;
     });
   }
@@ -797,8 +842,19 @@ class Instance : public DrawEngine {
     const int material_len = BKE_object_material_used_with_fallback_eval(*ob);
     const bool has_uv = ob->type == OB_MESH &&
                         mesh_has_uv_map(DRW_object_get_data_for_drawing<Mesh>(*ob));
-    Span<gpu::Batch *> batches;
+    /* Images beyond the base color need the tangents. */
+    bool use_maps = false;
     if (has_uv) {
+      for (const int i : IndexRange(material_len)) {
+        const int index = material_index_get(BKE_object_material_get_eval(ob, i + 1));
+        use_maps |= materials_[index].has_maps() && !materials_[index].transparent();
+      }
+    }
+    Span<gpu::Batch *> batches;
+    if (use_maps) {
+      batches = DRW_cache_mesh_surface_texpaint_tangent_get(ob);
+    }
+    else if (has_uv) {
       batches = DRW_cache_mesh_surface_texpaint_get(ob);
     }
     else {
@@ -834,7 +890,10 @@ class Instance : public DrawEngine {
       const int index = material_index_get(material);
       const MaterialData &data = materials_[index];
       const bool textured = has_uv && data.texture && *data.texture;
-      const bool cutout = data.cutout() && textured;
+      const bool cutout = data.cutout() && has_uv;
+      const SurfaceKind kind = (use_maps && data.has_maps()) ? SURFACE_MAPS :
+                               (textured || cutout)          ? SURFACE_TEXTURE :
+                                                               SURFACE_PLAIN;
       if (casts_shadow) {
         if (data.transparent()) {
           translucent_ps_[0].draw(batches[i], handle);
@@ -860,9 +919,9 @@ class Instance : public DrawEngine {
       if (cutout) {
         alpha_prepass_get(index).draw(batches[i], handle);
       }
-      material_pass_get(index, textured, false).draw(batches[i], handle);
+      material_pass_get(index, kind, false).draw(batches[i], handle);
       if (!data.backface_culling) {
-        material_pass_get(index, textured, true).draw(batches[i], handle);
+        material_pass_get(index, kind, true).draw(batches[i], handle);
       }
     }
   }
@@ -878,6 +937,11 @@ class Instance : public DrawEngine {
                            int2(material_table_len, 1),
                            GPU_TEXTURE_USAGE_SHADER_READ);
     GPU_texture_update(material_tx_, GPU_DATA_FLOAT, table.data());
+    if (flat_normal_tx_.gpu_texture() == nullptr) {
+      const float4 flat(0.5f, 0.5f, 1.0f, 1.0f);
+      flat_normal_tx_.ensure_2d(
+          gpu::TextureFormat::UNORM_8_8_8_8, int2(1), GPU_TEXTURE_USAGE_SHADER_READ, flat);
+    }
     if (white_tx_.gpu_texture() == nullptr) {
       const float4 white(1.0f);
       white_tx_.ensure_2d(gpu::TextureFormat::UNORM_8_8_8_8,

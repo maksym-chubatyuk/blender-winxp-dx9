@@ -126,6 +126,10 @@ mechazyiu_gbuffer_single                           mechazyiu_gbuffer.hlsl SINGLE
 mechazyiu_gbuffer_flip_single                      mechazyiu_gbuffer.hlsl FLIP SINGLE
 mechazyiu_gbuffer_texture_single                   mechazyiu_gbuffer.hlsl TEXTURE SINGLE
 mechazyiu_gbuffer_texture_flip_single              mechazyiu_gbuffer.hlsl TEXTURE FLIP SINGLE
+mechazyiu_gbuffer_maps                             mechazyiu_gbuffer.hlsl MAPS
+mechazyiu_gbuffer_maps_flip                        mechazyiu_gbuffer.hlsl MAPS FLIP
+mechazyiu_gbuffer_maps_single                      mechazyiu_gbuffer.hlsl MAPS SINGLE
+mechazyiu_gbuffer_maps_flip_single                 mechazyiu_gbuffer.hlsl MAPS FLIP SINGLE
 mechazyiu_alpha_prepass                            mechazyiu_gbuffer.hlsl ALPHA_PREPASS TEXTURE
 mechazyiu_base                                     mechazyiu_base.hlsl
 mechazyiu_light_point                              mechazyiu_light.hlsl

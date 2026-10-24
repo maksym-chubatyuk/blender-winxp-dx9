@@ -63,6 +63,21 @@ ADDITIONAL_INFO(mechazyiu_gbuffer_texture_common)
 DO_STATIC_COMPILATION()
 GPU_SHADER_CREATE_END()
 
+/* Images for the normal (tangent space, the active UV map's tangents), the roughness and the
+ * metallic too. */
+GPU_SHADER_CREATE_INFO(mechazyiu_gbuffer_maps_common)
+VERTEX_IN(3, float4, at)
+SAMPLER(1, sampler2D, normal_tx)
+SAMPLER(2, sampler2D, roughness_tx)
+SAMPLER(3, sampler2D, metallic_tx)
+/* One-hot channel selections of the roughness and metallic images. */
+PUSH_CONSTANT(float4, roughness_channel)
+PUSH_CONSTANT(float4, metallic_channel)
+/* x: strength of the normal map. */
+PUSH_CONSTANT(float4, mat_maps)
+ADDITIONAL_INFO(mechazyiu_gbuffer_texture_common)
+GPU_SHADER_CREATE_END()
+
 /* The `_single` variants write one target per draw (hardware without multiple render targets). */
 GPU_SHADER_CREATE_INFO(mechazyiu_gbuffer_single_common)
 /* One-hot selection of the target written. */
@@ -93,8 +108,32 @@ ADDITIONAL_INFO(mechazyiu_gbuffer_single_common)
 DO_STATIC_COMPILATION()
 GPU_SHADER_CREATE_END()
 
+GPU_SHADER_CREATE_INFO(mechazyiu_gbuffer_maps)
+ADDITIONAL_INFO(mechazyiu_gbuffer_maps_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_gbuffer_maps_single)
+ADDITIONAL_INFO(mechazyiu_gbuffer_maps_common)
+ADDITIONAL_INFO(mechazyiu_gbuffer_single_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_gbuffer_maps_flip)
+ADDITIONAL_INFO(mechazyiu_gbuffer_maps_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_gbuffer_maps_flip_single)
+ADDITIONAL_INFO(mechazyiu_gbuffer_maps_common)
+ADDITIONAL_INFO(mechazyiu_gbuffer_single_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
 /* Cutouts (image alpha): depth where the alpha is 0.5 or more (alpha test). */
 GPU_SHADER_CREATE_INFO(mechazyiu_alpha_prepass)
+/* One-hot selection of the channel of `base_tx` holding the coverage. */
+PUSH_CONSTANT(float4, coverage_channel)
 ADDITIONAL_INFO(mechazyiu_gbuffer_texture_common)
 DO_STATIC_COMPILATION()
 GPU_SHADER_CREATE_END()
@@ -303,6 +342,7 @@ GPU_SHADER_CREATE_END()
 /* Cutout casters (image alpha, alpha tested). */
 GPU_SHADER_CREATE_INFO(mechazyiu_shadow_cutout_common)
 VERTEX_IN(2, float2, au)
+PUSH_CONSTANT(float4, coverage_channel)
 SAMPLER(0, sampler2D, base_tx)
 ADDITIONAL_INFO(mechazyiu_shadow_common)
 GPU_SHADER_CREATE_END()
