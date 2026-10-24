@@ -107,6 +107,18 @@ class Context {
   virtual void finish() = 0;
 
   virtual void memory_statistics_get(int *r_total_mem, int *r_free_mem) = 0;
+  /** See #GPU_render_target_budget. */
+  virtual int64_t render_target_budget()
+  {
+    return -1;
+  }
+  /** See #GPU_texture_write_rate. */
+  virtual double texture_write_rate(Texture * /*texture*/)
+  {
+    return 0.0;
+  }
+  /** See #GPU_memory_evict_managed. */
+  virtual void memory_evict_managed() {}
 
   virtual void debug_group_begin(const char * /*name*/, int /*index*/) {};
   virtual void debug_group_end() {};

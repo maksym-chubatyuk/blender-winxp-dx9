@@ -123,6 +123,8 @@ set(SRC
   engines/eevee/eevee_view.cc
   engines/eevee/eevee_volume.cc
   engines/eevee/eevee_world.cc
+  engines/ember/ember_engine.cc
+  engines/ember/ember_scene.cc
   engines/workbench/workbench_effect_antialiasing.cc
   engines/workbench/workbench_effect_cavity.cc
   engines/workbench/workbench_effect_dof.cc
@@ -285,6 +287,8 @@ set(SRC
   engines/select/select_defines.hh
   engines/select/select_engine.hh
   engines/select/select_instance.hh
+  engines/ember/ember_engine.h
+  engines/ember/ember_private.hh
   engines/workbench/workbench_defines.hh
   engines/workbench/workbench_engine.h
   engines/workbench/workbench_enums.hh
@@ -348,6 +352,8 @@ set(GLSL_SRC
   engines/overlay/shaders/infos/overlay_wireframe_infos.hh
 
   engines/select/shaders/infos/select_id_infos.hh
+
+  engines/ember/shaders/infos/ember_infos.hh
 
   engines/workbench/shaders/infos/workbench_depth_infos.hh
   engines/workbench/shaders/infos/workbench_effect_antialiasing_infos.hh
@@ -508,6 +514,9 @@ set(GLSL_SRC
   engines/eevee/eevee_uniform_shared.hh
   engines/eevee/eevee_velocity_shared.hh
   engines/eevee/eevee_volume_shared.hh
+
+  engines/ember/shaders/ember_d3d9_frag.glsl
+  engines/ember/shaders/ember_d3d9_vert.glsl
 
   engines/workbench/shaders/workbench_cavity.bsl.hh
   engines/workbench/shaders/workbench_common.bsl.hh
@@ -783,6 +792,9 @@ set(GLSL_INC
   engines/workbench
   engines/workbench/shaders
   engines/workbench/shaders/infos
+  engines/ember
+  engines/ember/shaders
+  engines/ember/shaders/infos
   engines/eevee
   engines/eevee/shaders
   engines/eevee/shaders/infos

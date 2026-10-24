@@ -94,6 +94,9 @@ _modules = [
 
     # XXX, keep last so panels show after all other tool options.
     "properties_workspace",
+
+    # Adds Ember to the panels of the modules above.
+    "properties_ember",
 ]
 
 import bpy
@@ -124,6 +127,7 @@ def register():
 
     space_filebrowser.register_props()
     properties_paint_common.register()
+    properties_ember.register()
 
     from bpy.props import (
         EnumProperty,

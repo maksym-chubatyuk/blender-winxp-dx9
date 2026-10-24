@@ -3036,7 +3036,9 @@ bool BKE_scene_use_spherical_stereo(Scene *scene)
 
 bool BKE_scene_uses_blender_eevee(const Scene *scene)
 {
-  return STREQ(scene->r.engine, RE_engine_id_BLENDER_EEVEE);
+  /* XP port: Ember replaces EEVEE (material previews, shading types). */
+  return STREQ(scene->r.engine, RE_engine_id_BLENDER_EEVEE) ||
+         STREQ(scene->r.engine, "BLENDER_EMBER");
 }
 
 bool BKE_scene_uses_blender_workbench(const Scene *scene)

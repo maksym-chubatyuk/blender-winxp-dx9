@@ -16,6 +16,10 @@
 
 namespace blender {
 
+namespace gpu {
+class Texture;
+}
+
 int GPU_max_texture_size();
 int GPU_max_texture_3d_size();
 uint32_t GPU_max_buffer_texture_size();
@@ -71,6 +75,22 @@ bool GPU_stencil_export_support();
 
 bool GPU_mem_stats_supported();
 void GPU_mem_stats_get(int *r_totalmem, int *r_freemem);
+
+/**
+ * Bytes of local video memory still free for render targets: the memory on the card minus the
+ * display surfaces and the render targets already allocated. -1 when the backend can't tell.
+ * Render targets beyond it may be placed in slower system (AGP) memory instead of failing.
+ */
+int64_t GPU_render_target_budget();
+/**
+ * Measured write rate of a render target texture in bytes per second (overwrites its content),
+ * 0 when the backend can't measure it. Tells render targets placed in system memory, several
+ * times slower than video memory.
+ */
+double GPU_texture_write_rate(gpu::Texture *texture);
+/** Move textures that can be restored out of video memory, so render targets created next get
+ * it first. */
+void GPU_memory_evict_managed();
 
 /**
  * Return support for the active context + window.

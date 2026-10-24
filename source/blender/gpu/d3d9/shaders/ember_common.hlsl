@@ -1,0 +1,64 @@
+/* SPDX-FileCopyrightText: 2026 Blender Authors
+ *
+ * SPDX-License-Identifier: GPL-2.0-or-later */
+
+/**
+ * Shared parts of the Ember render engine shaders (`draw/engines/ember`).
+ *
+ * G-buffer (all 32 bit per pixel, a requirement of multiple render targets on R300):
+ * - 0 (RGBA8): sqrt(diffuse color), roughness (at least 0.045).
+ * - 1 (RGB10_A2): view space normal * 0.5 + 0.5.
+ * - 2 (R32F): linear depth (distance along the view axis), 0 for the background.
+ * - 3 (RGBA8): sqrt(specular color at normal incidence), material index / 255.
+ *
+ * Passes over the G-buffer draw a rectangle (`rect`, in normalized device coordinates) and get
+ * the view space position of their pixels from the linear depth: the view ray of a pixel is
+ * linear in screen space for both projection types (`proj`, `proj_type`).
+ */
+
+/* 10 bits per component: precise enough without renormalizing (one instruction to decode, the
+ * light passes are at the ps_2_0 limit). */
+float3 ember_normal_decode(float3 e)
+{
+  return e * 2.0 - 1.0;
+}
+
+#ifdef EMBER_SCREEN_PASS
+float4 rect;
+float4 proj;
+/* x: 1 for perspective, zw: part of the textures used (tiles smaller than their buffers). */
+float4 proj_type;
+
+struct VertIn {
+  float vertex_id : TEXCOORD15;
+};
+
+struct VertOut {
+  float4 position : POSITION;
+  float2 uv : TEXCOORD0;
+  float3 ray_origin : TEXCOORD1;
+  float3 ray_dir : TEXCOORD2;
+};
+
+VertOut vert(VertIn v)
+{
+  /* Two triangles: corners (0,0) (1,0) (0,1), (1,0) (1,1) (0,1). */
+  float id = v.vertex_id;
+  float2 corner;
+  corner.x = saturate(1.0 - abs(id - 1.0)) + saturate(1.0 - abs(id - 3.0)) +
+             saturate(1.0 - abs(id - 4.0));
+  corner.y = saturate(1.0 - abs(id - 2.0)) + saturate(1.0 - abs(id - 4.0)) +
+             saturate(1.0 - abs(id - 5.0));
+  float2 ndc = lerp(rect.xy, rect.zw, corner);
+
+  VertOut o;
+  o.position = gpu_position(float4(ndc, 0.0, 1.0));
+  o.uv = (ndc * 0.5 + 0.5) * proj_type.zw;
+  /* Perspective: x = depth * (ndc.x + P20) / P00. Orthographic: x = (ndc.x - P30) / P00. */
+  float2 xy = (ndc + proj.zw) * proj.xy;
+  float persp = proj_type.x;
+  o.ray_origin = float3(xy * (1.0 - persp), 0.0);
+  o.ray_dir = float3(xy * persp, -1.0);
+  return o;
+}
+#endif

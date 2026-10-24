@@ -97,6 +97,10 @@ D3D9TextureFormat d3d9_texture_format(TextureFormat format)
     case TextureFormat::SRGB_DXT5:
     case TextureFormat::SNORM_DXT5:
       return {D3DFMT_DXT5, K::COMPRESSED, 4};
+    case TextureFormat::UNORM_10_10_10_2:
+      /* Render targets only (no conversion of uploaded data). R300 hardware renders to it along
+       * with other 32 bit formats. */
+      return {D3DFMT_A2B10G10R10, K::UNORM8, 4};
     case TextureFormat::SFLOAT_32_DEPTH_UINT_8:
       return {D3DFMT_D24S8, K::DEPTH, 1};
     case TextureFormat::SFLOAT_32_DEPTH:

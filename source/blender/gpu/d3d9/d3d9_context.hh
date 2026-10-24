@@ -96,6 +96,9 @@ class D3D9Context : public Context {
   void finish() override;
 
   void memory_statistics_get(int *r_total_mem, int *r_free_mem) override;
+  int64_t render_target_budget() override;
+  double texture_write_rate(Texture *texture) override;
+  void memory_evict_managed() override;
 
   bool debug_capture_begin(const char * /*title*/) override
   {

@@ -26,6 +26,8 @@
 #include "d3d9_state.hh"
 #include "d3d9_texture.hh"
 
+#include <ddraw.h>
+
 namespace blender::gpu {
 
 /* -------------------------------------------------------------------- */
@@ -306,6 +308,132 @@ void D3D9Context::memory_statistics_get(int *r_total_mem, int *r_free_mem)
   const int free_kb = int(device->GetAvailableTextureMem() / 1024);
   *r_total_mem = free_kb;
   *r_free_mem = free_kb;
+}
+
+/**
+ * Local video memory of the adapter in bytes (DirectDraw 7 tells local and AGP memory apart, the
+ * Direct3D 9 estimate adds them up), 0 when unknown. `BLENDER_D3D9_VRAM_MB` overrides it.
+ */
+static int64_t d3d9_local_video_memory()
+{
+  static int64_t bytes = -1;
+  if (bytes >= 0) {
+    return bytes;
+  }
+  bytes = 0;
+  if (const char *override_mb = getenv("BLENDER_D3D9_VRAM_MB")) {
+    bytes = int64_t(atoi(override_mb)) << 20;
+    return bytes;
+  }
+  HMODULE ddraw = LoadLibraryA("ddraw.dll");
+  if (ddraw == nullptr) {
+    return bytes;
+  }
+  using DirectDrawCreateExFn = HRESULT(WINAPI *)(GUID *, LPVOID *, REFIID, IUnknown *);
+  auto create = reinterpret_cast<DirectDrawCreateExFn>(
+      reinterpret_cast<void *>(GetProcAddress(ddraw, "DirectDrawCreateEx")));
+  IDirectDraw7 *dd = nullptr;
+  /* `IID_IDirectDraw7`, defined here to not link `dxguid`. */
+  static const GUID iid_directdraw7 = {
+      0x15e65ec0, 0x3b9c, 0x11d2, {0xb9, 0x2f, 0x00, 0x60, 0x97, 0x97, 0xea, 0x5b}};
+  if (create &&
+      SUCCEEDED(create(nullptr, reinterpret_cast<LPVOID *>(&dd), iid_directdraw7, nullptr)))
+  {
+    DDSCAPS2 caps = {};
+    caps.dwCaps = DDSCAPS_VIDEOMEMORY | DDSCAPS_LOCALVIDMEM;
+    DWORD total = 0, free_bytes = 0;
+    if (SUCCEEDED(dd->GetAvailableVidMem(&caps, &total, &free_bytes))) {
+      bytes = int64_t(total);
+    }
+    dd->Release();
+  }
+  FreeLibrary(ddraw);
+  return bytes;
+}
+
+int64_t D3D9Context::render_target_budget()
+{
+  const int64_t local = d3d9_local_video_memory();
+  if (local <= 0) {
+    return -1;
+  }
+  /* The driver doesn't report what is free (it places render targets beyond the card's memory in
+   * AGP memory instead of failing): subtract the desktop surface, a window sized swap chain, the
+   * render targets allocated by the backend and a reserve for the driver. */
+  D3DDISPLAYMODE mode = {};
+  int64_t display = 0;
+  if (SUCCEEDED(device->GetDisplayMode(0, &mode))) {
+    display = int64_t(mode.Width) * mode.Height * 4;
+  }
+  const int64_t reserve = int64_t(8) << 20;
+  return local - 2 * display - d3d9_render_target_bytes() - reserve;
+}
+
+double D3D9Context::texture_write_rate(Texture *texture)
+{
+  D3D9Texture *tex = static_cast<D3D9Texture *>(texture);
+  if (tex == nullptr || tex->is_depth()) {
+    return 0.0;
+  }
+  IDirect3DSurface9 *surface = tex->surface_get(0, 0);
+  if (surface == nullptr) {
+    return 0.0;
+  }
+  D3DSURFACE_DESC desc;
+  surface->GetDesc(&desc);
+  int texel_bytes = 4;
+  switch (desc.Format) {
+    case D3DFMT_A16B16G16R16F:
+    case D3DFMT_G32R32F:
+      texel_bytes = 8;
+      break;
+    case D3DFMT_A32B32G32R32F:
+      texel_bytes = 16;
+      break;
+    case D3DFMT_R16F:
+    case D3DFMT_L8:
+      texel_bytes = desc.Format == D3DFMT_L8 ? 1 : 2;
+      break;
+    default:
+      break;
+  }
+  const double bytes = double(desc.Width) * desc.Height * texel_bytes;
+  /* Fill it repeatedly (a fixed function clear, no state to restore) until enough time passed for
+   * the timer resolution, best of a few tries. */
+  end_scene();
+  IDirect3DQuery9 *query = nullptr;
+  if (FAILED(device->CreateQuery(D3DQUERYTYPE_EVENT, &query))) {
+    surface->Release();
+    return 0.0;
+  }
+  auto wait = [&]() {
+    query->Issue(D3DISSUE_END);
+    while (query->GetData(nullptr, 0, D3DGETDATA_FLUSH) == S_FALSE) {
+    }
+  };
+  wait();
+  const int fills = max_ii(4, int(64.0 * 1048576.0 / bytes));
+  double best = 0.0;
+  for (int attempt = 0; attempt < 3; attempt++) {
+    const double start = d3d9_time_ms();
+    for (int i = 0; i < fills; i++) {
+      device->ColorFill(surface, nullptr, D3DCOLOR_ARGB(0, i, 0, 0));
+    }
+    wait();
+    const double ms = d3d9_time_ms() - start;
+    if (ms > 0.0) {
+      best = max_dd(best, bytes * fills / (ms * 1e-3));
+    }
+  }
+  query->Release();
+  surface->Release();
+  return best;
+}
+
+void D3D9Context::memory_evict_managed()
+{
+  end_scene();
+  device->EvictManagedResources();
 }
 
 /** \} */

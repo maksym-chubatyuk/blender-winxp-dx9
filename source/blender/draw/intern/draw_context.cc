@@ -95,6 +95,7 @@
 
 #include "engines/compositor/compositor_engine.h"
 #include "engines/eevee/eevee_engine.h"
+#include "engines/ember/ember_engine.h"
 #include "engines/external/external_engine.h"
 #include "engines/gpencil/gpencil_engine.hh"
 #include "engines/image/image_engine.h"
@@ -1185,10 +1186,7 @@ void DRWContext::enable_engines(bool gpencil_engine_needed, RenderEngineType *re
 
   /* Regular V3D drawing. */
   {
-    /* XP port: no material preview (EEVEE), solid shading instead. */
-    const eDrawType drawtype = this->v3d->shading.type == OB_MATERIAL ?
-                                   OB_SOLID :
-                                   eDrawType(this->v3d->shading.type);
+    const eDrawType drawtype = eDrawType(this->v3d->shading.type);
     const bool use_xray = XRAY_ENABLED(this->v3d);
 
     /* Base engine. */
@@ -1198,9 +1196,15 @@ void DRWContext::enable_engines(bool gpencil_engine_needed, RenderEngineType *re
         view_data.workbench.set_used(true);
         break;
       case OB_MATERIAL:
+        /* XP port: Ember does the material preview (of every engine) instead of EEVEE. */
+        view_data.ember.set_used(true);
+        break;
       case OB_RENDER:
       default:
-        if (render_engine_type == &DRW_engine_viewport_eevee_type) {
+        if (render_engine_type == &DRW_engine_viewport_ember_type) {
+          view_data.ember.set_used(true);
+        }
+        else if (render_engine_type == &DRW_engine_viewport_eevee_type) {
           view_data.eevee.set_used(true);
         }
         else if (render_engine_type == &DRW_engine_viewport_workbench_type) {
@@ -2287,13 +2291,15 @@ bool DRWContext::is_viewport_compositor_enabled() const
 
 void DRW_engines_register()
 {
-  /* XP port: no EEVEE, it needs newer GPUs than Direct3D 9 ones. */
+  /* XP port: no EEVEE, it needs newer GPUs than Direct3D 9 ones. Ember replaces it. */
+  RE_engines_register(&DRW_engine_viewport_ember_type);
   RE_engines_register(&DRW_engine_viewport_workbench_type);
 }
 
 void DRW_engines_free()
 {
   eevee::Engine::free_static();
+  ember::Engine::free_static();
   workbench::Engine::free_static();
   draw::gpencil::Engine::free_static();
   image_engine::Engine::free_static();

@@ -1333,30 +1333,14 @@ static void handle_subversion_warning(Main *main, BlendFileReadReport *reports)
 }
 
 /**
- * XP port: EEVEE and the material preview shading need newer GPUs than Direct3D 9 ones, they
- * aren't available. Scenes using EEVEE use Workbench and material preview views are solid.
+ * XP port: EEVEE needs newer GPUs than Direct3D 9 ones, scenes using it use Ember, its
+ * replacement.
  */
 static void xp_port_replace_eevee(Main *bmain)
 {
   for (Scene &scene : bmain->scenes) {
     if (STRPREFIX(scene.r.engine, "BLENDER_EEVEE")) {
-      STRNCPY(scene.r.engine, RE_engine_id_BLENDER_WORKBENCH);
-    }
-  }
-  for (bScreen &screen : bmain->screens) {
-    for (ScrArea &area : screen.areabase) {
-      for (SpaceLink &sl : area.spacedata) {
-        if (sl.spacetype != SPACE_VIEW3D) {
-          continue;
-        }
-        View3D &v3d = reinterpret_cast<View3D &>(sl);
-        if (v3d.shading.type == OB_MATERIAL) {
-          v3d.shading.type = OB_SOLID;
-        }
-        if (v3d.shading.prev_type == OB_MATERIAL) {
-          v3d.shading.prev_type = OB_SOLID;
-        }
-      }
+      STRNCPY(scene.r.engine, "BLENDER_EMBER");
     }
   }
 }

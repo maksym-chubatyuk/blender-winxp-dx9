@@ -1057,9 +1057,15 @@ static void wm_draw_area_offscreen(bContext *C, wmWindow *win, ScrArea *area, bo
                                                                  1.0f;
         GPU_viewport_render_scale_set(region.runtime->draw_buffer->viewport,
                                       is_view3d ? scale : 1.0f);
-        /* Images and render results are drawn without blending: keep their precision. */
-        GPU_viewport_float_color_set(region.runtime->draw_buffer->viewport,
-                                     area->spacetype == SPACE_IMAGE);
+        /* Images, render results and Ember views are drawn without blending: keep their
+         * precision. */
+        bool float_color = area->spacetype == SPACE_IMAGE;
+        if (is_view3d) {
+          const View3D *v3d = static_cast<const View3D *>(area->spacedata.first);
+          float_color = v3d->shading.type == OB_MATERIAL ||
+                        (v3d->shading.type == OB_RENDER && STREQ(scene->r.engine, "BLENDER_EMBER"));
+        }
+        GPU_viewport_float_color_set(region.runtime->draw_buffer->viewport, float_color);
       }
       wm_draw_region_bind(&region, 0);
       ED_region_do_draw(C, &region);

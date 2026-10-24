@@ -784,6 +784,49 @@ class RENDER_PT_eevee_film(RenderButtonsPanel, Panel):
         sub.prop(props, "overscan_size", text="")
 
 
+class RENDER_PT_ember_sampling(RenderButtonsPanel, Panel):
+    bl_label = "Sampling"
+    COMPAT_ENGINES = {'BLENDER_EMBER'}
+
+    @classmethod
+    def poll(cls, context):
+        return (context.engine in cls.COMPAT_ENGINES)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+
+        props = context.scene.eevee
+
+        col = layout.column(align=True)
+        col.prop(props, "taa_samples", text="Viewport Samples")
+        col.prop(props, "taa_render_samples", text="Render")
+
+        col = layout.column()
+        col.prop(props, "light_threshold")
+
+
+class RENDER_PT_ember_film(RenderButtonsPanel, Panel):
+    bl_label = "Film"
+    bl_options = {'DEFAULT_CLOSED'}
+    COMPAT_ENGINES = {'BLENDER_EMBER'}
+
+    @classmethod
+    def poll(cls, context):
+        return (context.engine in cls.COMPAT_ENGINES)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+
+        rd = context.scene.render
+
+        col = layout.column()
+        col.prop(rd, "filter_size")
+        col.prop(rd, "film_transparent", text="Transparent")
+
+
 def draw_curves_settings(self, context):
     layout = self.layout
     scene = context.scene
@@ -1183,6 +1226,7 @@ class RENDER_PT_hydra_debug(RenderButtonsPanel, Panel):
 
 classes = (
     RENDER_PT_context,
+    RENDER_PT_ember_sampling,
     RENDER_PT_eevee_sampling,
     RENDER_PT_eevee_sampling_viewport,
     RENDER_PT_eevee_sampling_render,
@@ -1209,6 +1253,7 @@ classes = (
     RENDER_PT_eevee_motion_blur,
     RENDER_PT_eevee_motion_blur_curve,
     RENDER_PT_eevee_film,
+    RENDER_PT_ember_film,
     RENDER_PT_eevee_performance,
     RENDER_PT_eevee_performance_memory,
     RENDER_PT_eevee_performance_viewport,

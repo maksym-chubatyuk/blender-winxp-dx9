@@ -225,6 +225,21 @@ void GPU_mem_stats_get(int *r_totalmem, int *r_freemem)
   Context::get()->memory_statistics_get(r_totalmem, r_freemem);
 }
 
+int64_t GPU_render_target_budget()
+{
+  return Context::get()->render_target_budget();
+}
+
+double GPU_texture_write_rate(gpu::Texture *texture)
+{
+  return Context::get()->texture_write_rate(texture);
+}
+
+void GPU_memory_evict_managed()
+{
+  Context::get()->memory_evict_managed();
+}
+
 bool GPU_stereo_quadbuffer_support()
 {
   return Context::get()->front_right != nullptr;

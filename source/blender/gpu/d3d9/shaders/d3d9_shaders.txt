@@ -116,3 +116,16 @@ overlay_motion_path_point                      overlay_motion_path.hlsl POINT
 image_engine_image_shader                      image_engine_image.hlsl
 overlay_grid_background                        overlay_grid_background.hlsl
 overlay_grid_image                             overlay_grid_background.hlsl IMAGE
+
+# Ember render engine (draw/engines/ember).
+ember_gbuffer                                  ember_gbuffer.hlsl
+ember_gbuffer_flip                             ember_gbuffer.hlsl FLIP
+ember_gbuffer_texture                          ember_gbuffer.hlsl TEXTURE
+ember_gbuffer_texture_flip                     ember_gbuffer.hlsl TEXTURE FLIP
+ember_base                                     ember_base.hlsl
+ember_light_point                              ember_light.hlsl
+ember_light_spot                               ember_light.hlsl SPOT
+ember_light_sun                                ember_light.hlsl SUN
+ember_light_area                               ember_light.hlsl AREA
+ember_copy                                     ember_copy.hlsl
+ember_output                                   ember_copy.hlsl OUTPUT

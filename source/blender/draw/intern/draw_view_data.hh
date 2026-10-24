@@ -19,6 +19,7 @@
 
 #include "engines/compositor/compositor_engine.h"
 #include "engines/eevee/eevee_engine.h"
+#include "engines/ember/ember_engine.h"
 #include "engines/external/external_engine.h"
 #include "engines/gpencil/gpencil_engine.hh"
 #include "engines/image/image_engine.h"
@@ -71,6 +72,7 @@ struct DRWViewData {
 
   /** Engines running for this viewport. nullptr if not enabled. */
   eevee::Engine eevee;
+  ember::Engine ember;
   workbench::Engine workbench;
   draw::external::Engine external;
   image_engine::Engine image;
@@ -107,6 +109,7 @@ struct DRWViewData {
     /* Render engines. Output to the render result frame-buffer. Mutually exclusive. */
 
     callback(eevee);
+    callback(ember);
     callback(workbench);
     callback(external);
     callback(image);
