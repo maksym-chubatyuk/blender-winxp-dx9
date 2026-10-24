@@ -4,6 +4,11 @@
 
 #include "libocio_gpu_shader_binder.hh"
 
+#include <cmath>
+
+#include "BLI_array.hh"
+
+#include "GPU_context.hh"
 #include "GPU_texture.hh"
 
 #include "error_handling.hh"
@@ -172,6 +177,75 @@ static bool create_gpu_textures(internal::GPUTextures &textures,
   return true;
 }
 
+/* View transform lattice of Direct3D 9 (see `ocio_display.hlsl`): over log2 of the scene linear
+ * color, the range of the AgX log encoding (25 stops). */
+constexpr int d3d9_lut_size = 32;
+constexpr float d3d9_lut_log2_min = -12.47393f;
+constexpr float d3d9_lut_log2_range = 25.0f;
+
+/**
+ * The view transform of Direct3D 9 hardware (shader model 2: no float volume textures on some, no
+ * room for OpenColorIO's shaders): the display processor sampled on the CPU into a lattice of
+ * 8 bit colors, the square root of the display linear color (decoded from sRGB). Standard sRGB
+ * views keep the exact transform of the shader.
+ */
+static bool d3d9_view_lut_create(internal::GPUTextures &textures,
+                                 const ConstProcessorRcPtr &processor_to_display)
+{
+  const int n = d3d9_lut_size;
+  Array<float> colors(size_t(n) * n * n * 3);
+  float *color = colors.data();
+  for (int b = 0; b < n; b++) {
+    for (int g = 0; g < n; g++) {
+      for (int r = 0; r < n; r++) {
+        for (const int i : {r, g, b}) {
+          /* The first point is black. */
+          *color++ = (i == 0) ? 0.0f :
+                                std::exp2(d3d9_lut_log2_min +
+                                          d3d9_lut_log2_range * float(i) / float(n - 1));
+        }
+      }
+    }
+  }
+  try {
+    PackedImageDesc image(colors.data(), n * n * n, 1, 3);
+    processor_to_display->getDefaultCPUProcessor()->apply(image);
+  }
+  catch (Exception &exception) {
+    report_exception(exception);
+    return false;
+  }
+  Array<uchar> texels(size_t(n) * n * n * 4);
+  for (const int64_t i : IndexRange(int64_t(n) * n * n)) {
+    for (int c = 0; c < 3; c++) {
+      const float encoded = std::clamp(colors[i * 3 + c], 0.0f, 1.0f);
+      const float linear = (encoded < 0.04045f) ? encoded / 12.92f :
+                                                  std::pow((encoded + 0.055f) / 1.055f, 2.4f);
+      texels[i * 4 + c] = uchar(std::sqrt(linear) * 255.0f + 0.5f);
+    }
+    texels[i * 4 + 3] = 255;
+  }
+
+  internal::GPULutTexture lut;
+  lut.texture = GPU_texture_create_3d("OCIOViewLUT",
+                                      n,
+                                      n,
+                                      n,
+                                      1,
+                                      gpu::TextureFormat::UNORM_8_8_8_8,
+                                      GPU_TEXTURE_USAGE_SHADER_READ,
+                                      nullptr);
+  if (lut.texture == nullptr) {
+    return false;
+  }
+  GPU_texture_update(lut.texture, GPU_DATA_UBYTE, texels.data());
+  GPU_texture_filter_mode(lut.texture, true);
+  GPU_texture_extend_mode(lut.texture, GPU_SAMPLER_EXTEND_MODE_EXTEND);
+  lut.sampler_name = "view_lut";
+  textures.luts.append(lut);
+  return true;
+}
+
 }  // namespace
 
 void LibOCIOGPUShaderBinder::construct_shader_for_processors(
@@ -227,6 +301,8 @@ void LibOCIOGPUShaderBinder::construct_shader_for_processors(
   display_shader.is_valid = true;
 }
 
+static const std::array<StringRefNull, 2> d3d9_lut_define[1] = {{"D3D9_VIEW_LUT", ""}};
+
 void LibOCIOGPUShaderBinder::construct_display_shader(
     internal::GPUDisplayShader &display_shader) const
 {
@@ -239,6 +315,23 @@ void LibOCIOGPUShaderBinder::construct_display_shader(
 
   if (!processor_to_scene_linear || !processor_to_display) {
     display_shader.is_valid = false;
+    return;
+  }
+
+  if (GPU_backend_get_type() == GPU_BACKEND_D3D9) {
+    /* The shader of Direct3D 9 converts from scene linear; Standard sRGB exactly, other views
+     * through a lattice. */
+    const bool standard = display_shader.view == "Standard" && display_shader.look.empty() &&
+                          display_shader.display == "sRGB";
+    if (!standard && !d3d9_view_lut_create(display_shader.textures, processor_to_display)) {
+      display_shader.is_valid = false;
+      return;
+    }
+    display_shader.is_valid = create_gpu_shader(
+        display_shader,
+        "",
+        standard ? Span<std::array<StringRefNull, 2>>() :
+                   Span<std::array<StringRefNull, 2>>(d3d9_lut_define, 1));
     return;
   }
 

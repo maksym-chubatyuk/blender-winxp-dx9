@@ -486,7 +486,12 @@ bool GPUShaderBinder::create_gpu_shader(
   StageInterfaceInfo iface("OCIO_Interface", "");
   iface.smooth(Type::float2_t, "texCoord_interp");
 
-  ShaderCreateInfo info("OCIO_Display");
+  /* Direct3D 9 has precompiled shaders, the view transform through a lattice is another one. */
+  bool d3d9_view_lut = false;
+  for (const auto &additional_define : additional_defines) {
+    d3d9_view_lut |= additional_define[0] == "D3D9_VIEW_LUT";
+  }
+  ShaderCreateInfo info(d3d9_view_lut ? "OCIO_Display_lut" : "OCIO_Display");
   info.builtins(BuiltinBits::NO_BUFFER_TYPE_LINTING);
 
   for (const auto &additional_define : additional_defines) {

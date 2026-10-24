@@ -6,8 +6,11 @@
  * Display transform of the viewport and images (`OCIO_Display`, generated from the OpenColorIO
  * configuration for the other backends).
  *
- * Only the "Standard" view of sRGB displays is implemented: scene linear Rec.709 to sRGB, with
- * exposure, gamma and the merge of the overlays. Curve mapping and looks are ignored.
+ * The "Standard" view of sRGB displays is exact: scene linear Rec.709 to sRGB, with exposure,
+ * gamma and the merge of the overlays. Other views and looks (D3D9_VIEW_LUT,
+ * `OCIO_Display_lut`) go through a lattice made on the CPU: 32^3 colors over log2 of the scene
+ * linear color, holding the square root of the display linear color (see
+ * `libocio_gpu_shader_binder.cc`). Curve mapping is ignored.
  */
 
 #include "d3d9_common.hlsl"
@@ -19,6 +22,9 @@ float4 parameters[6];
 float4x4 ModelViewProjectionMatrix;
 sampler2D image_texture : register(s0);
 sampler2D overlay_texture : register(s1);
+#ifdef D3D9_VIEW_LUT
+sampler3D view_lut : register(s3);
+#endif
 
 struct VertIn {
   float2 pos : TEXCOORD0;
@@ -54,6 +60,13 @@ float4 frag(VertOut v) : COLOR0
   float4x4 scene_linear_matrix = float4x4(parameters[2], parameters[3], parameters[4], parameters[5]);
   col = mul(col, scene_linear_matrix);
   float3 lin = max(col.rgb, 0.0);
+#ifdef D3D9_VIEW_LUT
+  /* Lattice coordinates: log2 from -12.47393 over 25 stops, texel centers (32 texels). The first
+   * texel is black. */
+  float3 position = saturate(log2(max(lin, 1e-10)) * (1.0 / 25.0) + (12.47393 / 25.0));
+  float3 view = tex3D(view_lut, position * (31.0 / 32.0) + (0.5 / 32.0)).rgb;
+  lin = view * view;
+#endif
 
   /* The display gamma (`exponent`) and the overlay merge are done in linear space, then the
    * gamma and the sRGB encoding are a single power (the 64 instructions of ps_2_0 are slow over

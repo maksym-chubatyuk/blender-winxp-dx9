@@ -42,6 +42,7 @@ gpu_shader_2D_point_uniform_size_uniform_color_aa gpu_shader_2D_point_aa.hlsl
 d3d9_internal_blit                             d3d9_internal_blit.hlsl
 
 OCIO_Display                                   ocio_display.hlsl
+OCIO_Display_lut                               ocio_display.hlsl D3D9_VIEW_LUT
 gpu_shader_2D_image_overlays_merge             gpu_shader_image_overlays_merge.hlsl
 
 # Draw engines.
