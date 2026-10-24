@@ -57,13 +57,21 @@ struct MaterialData {
   /** The alpha of the image multiplies `alpha` (the image's alpha output is linked to it). */
   bool texture_alpha = false;
   bool backface_culling = false;
-  /** Material render method: blended (sorted, drawn over the lit image), else dithered. */
+  /** Material render method "Blended". */
   bool blended = false;
 
-  /** Dithered materials with partial coverage: alpha tested against noise each sample. */
-  bool dithered() const
+  /**
+   * Partly transparent: sorted, drawn over the lit image (also for the "Dithered" render method,
+   * dithering needs far more samples than this hardware can render).
+   */
+  bool transparent() const
   {
-    return !blended && (alpha < 1.0f || texture_alpha);
+    return blended || alpha < 1.0f;
+  }
+  /** Image alpha cutouts: alpha tested at 0.5, like the games of the time. */
+  bool cutout() const
+  {
+    return !transparent() && texture_alpha;
   }
 };
 

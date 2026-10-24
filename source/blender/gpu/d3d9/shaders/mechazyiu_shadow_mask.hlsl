@@ -10,6 +10,10 @@
  * Shadow map atlas: CUBE faces are cells of a 4 x 2 grid (face 2 * axis + negative), the others
  * use the left half. One lookup per sample, moved by a sub-texel offset each sample: the samples
  * average into filtered edges.
+ *
+ * Transparent casters: `translucent_depth_tx` (same layout, half resolution) has the distance of
+ * the nearest one, `transmittance_tx` the light they let through. Surfaces behind the nearest one
+ * get that light (white textures when there are none).
  */
 
 #include "d3d9_common.hlsl"
@@ -19,6 +23,8 @@
 sampler2D gb_normal_tx : register(s1);
 sampler2D gb_depth_tx : register(s2);
 sampler2D shadow_tx : register(s6);
+sampler2D translucent_depth_tx : register(s7);
+sampler2D transmittance_tx : register(s8);
 
 /* View space light position (CUBE), w: 1 / far distance. */
 float4 light_position;
@@ -71,5 +77,9 @@ float4 frag(VertOut v) : COLOR0
   float2 uv = (clip.xy * 0.5 + 0.5) * float2(0.5, 1.0) + shadow_params.xy;
 #endif
   float occluder = mechazyiu_distance_decode(tex2D(shadow_tx, uv).rgb);
-  return (ref * shadow_bias.x - shadow_bias.y <= occluder ? 1.0 : 0.0).xxxx;
+  float translucent = mechazyiu_distance_decode(tex2D(translucent_depth_tx, uv).rgb);
+  float transmittance = tex2D(transmittance_tx, uv).r;
+  float biased = ref * shadow_bias.x - shadow_bias.y;
+  float lit = biased <= occluder ? 1.0 : 0.0;
+  return (lit * (biased <= translucent ? 1.0 : transmittance)).xxxx;
 }

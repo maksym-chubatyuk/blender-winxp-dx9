@@ -8,9 +8,9 @@
  * normals), SINGLE (one target per draw, on hardware without multiple render targets:
  * `gbuffer_target` selects it).
  *
- * ALPHA_PREPASS (`mechazyiu_alpha_prepass`): depth of the dithered transparent surfaces, alpha
- * tested against noise; their G-buffer pass then only draws where its depth is equal. The vertex
- * shader is the same, for the same depths.
+ * ALPHA_PREPASS (`mechazyiu_alpha_prepass`): depth of the cutout surfaces (image alpha, alpha
+ * tested at 0.5); their G-buffer pass then only draws where its depth is equal. The vertex shader
+ * is the same, for the same depths.
  */
 
 #include "d3d9_common.hlsl"
@@ -28,8 +28,6 @@ float4 gbuffer_target;
 #endif
 #ifdef ALPHA_PREPASS
 // d3d9-alpha-test
-/* See #mechazyiu_coverage. `mat_params.w`: 1 when the alpha of the texture is the coverage. */
-float4 alpha_params;
 #endif
 #ifdef TEXTURE
 sampler2D base_tx : register(s0);
@@ -49,9 +47,6 @@ struct VertOut {
 #ifdef TEXTURE
   float2 uv : TEXCOORD1;
 #endif
-#ifdef ALPHA_PREPASS
-  float3 clip_xyw : TEXCOORD2;
-#endif
 };
 
 VertOut vert(VertIn v)
@@ -61,9 +56,7 @@ VertOut vert(VertIn v)
   float4 view_pos = drw_mat_mul(view_buf, DRW_VIEWMAT, float4(world_pos, 1.0));
   float4 clip = drw_mat_mul(view_buf, DRW_WINMAT, view_pos);
   o.position = gpu_position(clip);
-#ifdef ALPHA_PREPASS
-  o.clip_xyw = clip.xyw;
-#endif
+
   float3 n = drw_mat_mul3(view_buf, DRW_VIEWMAT, drw_normal_object_to_world(v.nor));
 #ifdef FLIP
   n = -n;
@@ -78,11 +71,11 @@ VertOut vert(VertIn v)
 #ifdef ALPHA_PREPASS
 float4 frag(VertOut v) : COLOR0
 {
-  float alpha = mat_base.a;
 #  ifdef TEXTURE
-  alpha *= lerp(1.0, tex2D(base_tx, v.uv).a, mat_params.w);
+  return float4(0.0, 0.0, 0.0, tex2D(base_tx, v.uv).a);
+#  else
+  return 1.0;
 #  endif
-  return float4(0.0, 0.0, 0.0, mechazyiu_coverage(alpha, v.clip_xyw, alpha_params));
 }
 #else
 

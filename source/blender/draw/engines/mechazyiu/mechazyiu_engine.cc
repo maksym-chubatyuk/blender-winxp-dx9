@@ -91,7 +91,8 @@ constexpr int64_t tile_bytes_per_pixel = 4 * 4 + 4 + 2 * 8 + 4 + 8;
 constexpr int shadow_atlas_width = 2048;
 constexpr int shadow_atlas_height = 1024;
 constexpr int shadow_cube_size = 512;
-constexpr int64_t shadow_atlas_bytes = int64_t(shadow_atlas_width) * shadow_atlas_height * 8;
+constexpr int64_t shadow_atlas_bytes = int64_t(shadow_atlas_width) * shadow_atlas_height * 8 +
+                                       int64_t(shadow_atlas_width) * shadow_atlas_height * 12 / 4;
 /** Running mean (half float) and linear depth of the whole viewport. */
 constexpr int64_t view_bytes_per_pixel = 8 + 4;
 
@@ -118,11 +119,11 @@ class ShaderCache {
        {"mechazyiu_light_area_blend"}}};
   gpu::StaticShader mix = {"mechazyiu_mix"};
   gpu::StaticShader shadow[2 /*ortho*/] = {{"mechazyiu_shadow"}, {"mechazyiu_shadow_ortho"}};
-  gpu::StaticShader shadow_alpha[2 /*ortho*/][2 /*texture*/] = {
-      {{"mechazyiu_shadow_alpha"}, {"mechazyiu_shadow_alpha_texture"}},
-      {{"mechazyiu_shadow_ortho_alpha"}, {"mechazyiu_shadow_ortho_alpha_texture"}}};
-  gpu::StaticShader alpha_prepass[2 /*texture*/] = {{"mechazyiu_alpha_prepass"},
-                                                    {"mechazyiu_alpha_prepass_texture"}};
+  gpu::StaticShader shadow_cutout[2 /*ortho*/] = {{"mechazyiu_shadow_cutout"},
+                                                  {"mechazyiu_shadow_ortho_cutout"}};
+  gpu::StaticShader shadow_transmit[2 /*texture*/] = {{"mechazyiu_shadow_transmit"},
+                                                      {"mechazyiu_shadow_transmit_texture"}};
+  gpu::StaticShader alpha_prepass = {"mechazyiu_alpha_prepass"};
   gpu::StaticShader forward[2 /*light*/][2 /*texture*/][2 /*blend*/] = {
       {{{"mechazyiu_forward"}, {"mechazyiu_forward_blend"}},
        {{"mechazyiu_forward_texture"}, {"mechazyiu_forward_texture_blend"}}},
@@ -361,11 +362,16 @@ class Instance : public DrawEngine {
   PassSimple output_ps_ = {"mechazyiu.output"};
   /** Shadow casters, perspective and orthographic. */
   PassMain shadow_ps_[2] = {{"mechazyiu.shadow"}, {"mechazyiu.shadow_ortho"}};
-  /** Depth of the dithered transparent surfaces, before the G-buffer. */
+  /** Depth of the cutout surfaces, before the G-buffer. */
   PassMain alpha_prepass_ps_ = {"mechazyiu.alpha_prepass"};
   Map<int3, PassMain::Sub *> alpha_prepass_subs_;
-  /** Dithered casters of the shadow passes, by material: [index][ortho][textured]. */
-  Map<int3, PassMain::Sub *> shadow_alpha_subs_;
+  /** Cutout casters of the shadow passes, by material: [index][ortho]. */
+  Map<int3, PassMain::Sub *> shadow_cutout_subs_;
+  /** Transparent casters: their distance (perspective, orthographic), then their transmittance. */
+  PassMain translucent_ps_[2] = {{"mechazyiu.translucent"}, {"mechazyiu.translucent_ortho"}};
+  PassMain transmit_ps_ = {"mechazyiu.transmit"};
+  Map<int3, PassMain::Sub *> transmit_subs_;
+  bool has_translucent_casters_ = false;
   Vector<std::unique_ptr<BlendedDraw>> blended_;
   /** Shadow masks of cube, spot and sun shadow maps. */
   PassSimple shadow_mask_ps_[3] = {{"mechazyiu.shadow_mask_cube"},
@@ -404,8 +410,18 @@ class Instance : public DrawEngine {
   Texture shadow_tx_ = {"mechazyiu.shadow"};
   Texture shadow_depth_tx_ = {"mechazyiu.shadow_depth"};
   Framebuffer shadow_fb_ = {"mechazyiu.shadow"};
-  /** Lights without shadow read this instead of the mask. */
+  /** Transparent casters, at half the atlas resolution: the distance of the nearest one, the
+   * light they let through. */
+  Texture translucent_depth_tx_ = {"mechazyiu.translucent_depth"};
+  Texture translucent_zbuf_tx_ = {"mechazyiu.translucent_zbuf"};
+  Texture transmittance_tx_ = {"mechazyiu.transmittance"};
+  Framebuffer translucent_fb_ = {"mechazyiu.translucent"};
+  Framebuffer transmittance_fb_ = {"mechazyiu.transmittance"};
+  /** Lights without shadow read this instead of the mask, and the shadow masks instead of the
+   * transparent casters' maps when there are none. */
   Texture white_tx_ = {"mechazyiu.white"};
+  gpu::Texture *translucent_depth_src_ = nullptr;
+  gpu::Texture *transmittance_src_ = nullptr;
   TilePlan plan_;
   int2 tile_allocated_ = int2(0);
   int64_t budget_ = 0;
@@ -428,8 +444,6 @@ class Instance : public DrawEngine {
   float4 world_sh_[4] = {};
   float4 background_ = float4(0.0f);
   float4 gbuffer_target_ = float4(1.0f, 0.0f, 0.0f, 0.0f);
-  float4 alpha_params_ = float4(0.0f);
-  float4 shadow_alpha_params_ = float4(0.0f);
   gpu::Texture *forward_src_ = nullptr;
   float4 forward_light_position_ = float4(0.0f);
   float4 forward_light_direction_ = float4(0.0f);
@@ -507,7 +521,18 @@ class Instance : public DrawEngine {
     alpha_prepass_ps_.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_DEPTH |
                                 DRW_STATE_DEPTH_LESS_EQUAL);
     alpha_prepass_subs_.clear();
-    shadow_alpha_subs_.clear();
+    shadow_cutout_subs_.clear();
+    transmit_subs_.clear();
+    has_translucent_casters_ = false;
+    for (int ortho = 0; ortho < 2; ortho++) {
+      translucent_ps_[ortho].init();
+      translucent_ps_[ortho].state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_DEPTH |
+                                       DRW_STATE_DEPTH_LESS_EQUAL);
+      translucent_ps_[ortho].shader_set(ShaderCache::get().shadow[ortho].get());
+      translucent_ps_[ortho].push_constant("shadow_light", &shadow_light_);
+    }
+    transmit_ps_.init();
+    transmit_ps_.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_BLEND_MUL);
     blended_.clear();
 
     ShaderCache &shaders = ShaderCache::get();
@@ -565,6 +590,9 @@ class Instance : public DrawEngine {
       ps.bind_texture("gb_depth_tx", &gb_depth_tx_);
       /* Packed distances: never filtered. */
       ps.bind_texture("shadow_tx", &shadow_tx_, GPUSamplerState::default_sampler());
+      ps.bind_texture(
+          "translucent_depth_tx", &translucent_depth_src_, GPUSamplerState::default_sampler());
+      ps.bind_texture("transmittance_tx", &transmittance_src_);
       ps.push_constant("light_position", &shadow_light_view_);
       ps.push_constant("shadow_mat", shadow_mat_, 4);
       ps.push_constant("shadow_params", &shadow_params_);
@@ -614,9 +642,9 @@ class Instance : public DrawEngine {
     return *material_passes_.lookup_or_add_cb(int3(index, textured, back), [&]() {
       const MaterialData &data = materials_[index];
       PassMain::Sub &sub = gbuffer_ps_.sub("mechazyiu.material");
-      /* Dithered surfaces: only the pixels their prepass kept. */
-      const DRWState depth_test = data.dithered() ? DRW_STATE_DEPTH_EQUAL :
-                                                    DRW_STATE_DEPTH_LESS_EQUAL;
+      /* Cutouts: only the pixels their prepass kept. */
+      const DRWState depth_test = data.cutout() && textured ? DRW_STATE_DEPTH_EQUAL :
+                                                              DRW_STATE_DEPTH_LESS_EQUAL;
       sub.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_DEPTH | depth_test |
                     (back ? DRW_STATE_CULL_FRONT : DRW_STATE_CULL_BACK));
       const bool single = !caps_.multiple_targets;
@@ -636,36 +664,43 @@ class Instance : public DrawEngine {
     });
   }
 
-  /** Coverage of the material, alpha tested: [textured][culled back faces]. */
-  PassMain::Sub &alpha_prepass_get(int index, bool textured)
+  /** Cutout surfaces: depth where the image alpha is 0.5 or more. */
+  PassMain::Sub &alpha_prepass_get(int index)
   {
     const MaterialData &data = materials_[index];
-    return *alpha_prepass_subs_.lookup_or_add_cb(int3(index, textured, 0), [&]() {
+    return *alpha_prepass_subs_.lookup_or_add_cb(int3(index, 0, 0), [&]() {
       PassMain::Sub &sub = alpha_prepass_ps_.sub("mechazyiu.alpha_prepass");
       sub.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_DEPTH | DRW_STATE_DEPTH_LESS_EQUAL |
                     (data.backface_culling ? DRW_STATE_CULL_BACK : DRWState(0)));
-      sub.shader_set(ShaderCache::get().alpha_prepass[textured].get());
-      sub.push_constant("mat_base", float4(data.base_color, data.alpha));
-      sub.push_constant("mat_params", float4(0.0f, 0.0f, 0.0f, data.texture_alpha ? 1.0f : 0.0f));
-      sub.push_constant("alpha_params", &alpha_params_);
-      if (textured) {
-        sub.bind_texture("base_tx", data.texture, data.sampler);
-      }
+      sub.shader_set(ShaderCache::get().alpha_prepass.get());
+      sub.bind_texture("base_tx", data.texture, data.sampler);
       return &sub;
     });
   }
 
-  /** Shadow casters with partial coverage (dithered and blended materials). */
-  PassMain::Sub &shadow_alpha_get(int index, bool ortho, bool textured)
+  /** Cutout shadow casters. */
+  PassMain::Sub &shadow_cutout_get(int index, bool ortho)
   {
     const MaterialData &data = materials_[index];
-    return *shadow_alpha_subs_.lookup_or_add_cb(int3(index, ortho, textured), [&]() {
-      PassMain::Sub &sub = shadow_ps_[ortho].sub("mechazyiu.shadow_alpha");
-      sub.shader_set(ShaderCache::get().shadow_alpha[ortho][textured].get());
+    return *shadow_cutout_subs_.lookup_or_add_cb(int3(index, ortho, 0), [&]() {
+      PassMain::Sub &sub = shadow_ps_[ortho].sub("mechazyiu.shadow_cutout");
+      sub.shader_set(ShaderCache::get().shadow_cutout[ortho].get());
+      sub.push_constant("shadow_light", &shadow_light_);
+      sub.bind_texture("base_tx", data.texture, data.sampler);
+      return &sub;
+    });
+  }
+
+  /** Transparent shadow casters: the light they let through. */
+  PassMain::Sub &transmit_get(int index, bool textured)
+  {
+    const MaterialData &data = materials_[index];
+    return *transmit_subs_.lookup_or_add_cb(int3(index, textured, 0), [&]() {
+      PassMain::Sub &sub = transmit_ps_.sub("mechazyiu.transmit");
+      sub.shader_set(ShaderCache::get().shadow_transmit[textured].get());
       sub.push_constant("shadow_light", &shadow_light_);
       sub.push_constant("mat_base", float4(data.base_color, data.alpha));
       sub.push_constant("mat_params", float4(0.0f, 0.0f, 0.0f, data.texture_alpha ? 1.0f : 0.0f));
-      sub.push_constant("alpha_params", &shadow_alpha_params_);
       if (textured) {
         sub.bind_texture("base_tx", data.texture, data.sampler);
       }
@@ -799,23 +834,31 @@ class Instance : public DrawEngine {
       const int index = material_index_get(material);
       const MaterialData &data = materials_[index];
       const bool textured = has_uv && data.texture && *data.texture;
-      const bool partial = data.blended || data.dithered();
+      const bool cutout = data.cutout() && textured;
       if (casts_shadow) {
-        for (int ortho = 0; ortho < 2; ortho++) {
-          if (partial) {
-            shadow_alpha_get(index, ortho, textured).draw(batches[i], handle);
-          }
-          else {
-            shadow_ps_[ortho].draw(batches[i], handle);
+        if (data.transparent()) {
+          translucent_ps_[0].draw(batches[i], handle);
+          translucent_ps_[1].draw(batches[i], handle);
+          transmit_get(index, textured).draw(batches[i], handle);
+          has_translucent_casters_ = true;
+        }
+        else {
+          for (int ortho = 0; ortho < 2; ortho++) {
+            if (cutout) {
+              shadow_cutout_get(index, ortho).draw(batches[i], handle);
+            }
+            else {
+              shadow_ps_[ortho].draw(batches[i], handle);
+            }
           }
         }
       }
-      if (data.blended) {
+      if (data.transparent()) {
         blended_sync(data, textured, batches[i], handle, *ob);
         continue;
       }
-      if (data.dithered()) {
-        alpha_prepass_get(index, textured).draw(batches[i], handle);
+      if (cutout) {
+        alpha_prepass_get(index).draw(batches[i], handle);
       }
       material_pass_get(index, textured, false).draw(batches[i], handle);
       if (!data.backface_culling) {
@@ -934,6 +977,13 @@ class Instance : public DrawEngine {
     shadow_tx_.ensure_2d(gpu::TextureFormat::UNORM_8_8_8_8, atlas_size, usage);
     shadow_depth_tx_.ensure_2d(gpu::TextureFormat::SFLOAT_32_DEPTH_UINT_8, atlas_size, usage);
     shadow_fb_.ensure(GPU_ATTACHMENT_TEXTURE(shadow_depth_tx_), GPU_ATTACHMENT_TEXTURE(shadow_tx_));
+    const int2 half_atlas = atlas_size / 2;
+    translucent_depth_tx_.ensure_2d(gpu::TextureFormat::UNORM_8_8_8_8, half_atlas, usage);
+    translucent_zbuf_tx_.ensure_2d(gpu::TextureFormat::SFLOAT_32_DEPTH_UINT_8, half_atlas, usage);
+    transmittance_tx_.ensure_2d(gpu::TextureFormat::UNORM_8_8_8_8, half_atlas, usage);
+    translucent_fb_.ensure(GPU_ATTACHMENT_TEXTURE(translucent_zbuf_tx_),
+                           GPU_ATTACHMENT_TEXTURE(translucent_depth_tx_));
+    transmittance_fb_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(transmittance_tx_));
     depth_tx_.ensure_2d(gpu::TextureFormat::SFLOAT_32_DEPTH_UINT_8, size, usage);
     for (int i = 0; i < 2; i++) {
       accum_tx_[i].ensure_2d(gpu::TextureFormat::SFLOAT_16_16_16_16, size, usage);
@@ -1094,11 +1144,10 @@ class Instance : public DrawEngine {
      * passes sample it with scaled texture coordinates. */
     const float2 used = float2(tile.z, tile.w) / float2(tile_allocated_);
     proj_type_ = float4(proj_type_.x, 0.0f, used.x, used.y);
-    /* Depth of the dithered surfaces where they cover the pixel this sample. */
+    /* Depth of the cutout surfaces where their image covers the pixel. */
     GPU_framebuffer_bind(alpha_prepass_fb_);
     GPU_framebuffer_viewport_set(alpha_prepass_fb_, 0, 0, tile.z, tile.w);
     GPU_framebuffer_clear_depth_stencil(alpha_prepass_fb_, 1.0f, 0x00);
-    alpha_params_ = coverage_params(float2(tile.z, tile.w) * 0.5f, sample, 0);
     manager.submit(alpha_prepass_ps_, view_);
 
     if (caps_.multiple_targets) {
@@ -1240,19 +1289,6 @@ class Instance : public DrawEngine {
     manager.submit(copy_ps_);
   }
 
-  /**
-   * Noise of the dithered transparency for a sample (see `mechazyiu_coverage`): the pattern moves
-   * by a random pixel offset and the threshold by the golden ratio sequence (`stream` decorrelates
-   * the screen and the shadow maps).
-   */
-  static float4 coverage_params(float2 half_size, int sample, int stream)
-  {
-    const float threshold = math::fract(float(sample) * 0.618034f + float(stream) * 0.5f);
-    /* Small offsets: the noise loses its precision on large coordinates (24 bit floats). */
-    const float offset = float(int(halton(sample + 1, 7 + 4 * stream) * 64.0f));
-    return float4(half_size, offset, threshold);
-  }
-
   /** Normalized device rectangle of world space bounds, false when off the tile. */
   static bool bounds_rect_get(const float3 &bounds_min,
                               const float3 &bounds_max,
@@ -1391,11 +1427,32 @@ class Instance : public DrawEngine {
                               float2(0.0f);
     const float2 atlas_texel = 1.0f / float2(shadow_atlas_width, shadow_atlas_height);
     shadow_params_ = float4(jitter * atlas_texel * 2.0f, 0.0f, 0.0f);
-    /* Coverage noise of the dithered casters, in texels of the face. */
-    const float face_size = light.type == LightType::SUN || light.type == LightType::SPOT ?
-                                float(shadow_atlas_height) :
-                                float(shadow_cube_size);
-    shadow_alpha_params_ = coverage_params(float2(face_size * 0.5f), sample, 1);
+    translucent_depth_src_ = white_tx_;
+    transmittance_src_ = white_tx_;
+    if (has_translucent_casters_) {
+      GPU_framebuffer_bind(translucent_fb_);
+      GPU_framebuffer_clear_color_depth(translucent_fb_, double4(1.0), 1.0f);
+      GPU_framebuffer_bind(transmittance_fb_);
+      GPU_framebuffer_clear_color(transmittance_fb_, double4(1.0));
+      translucent_depth_src_ = translucent_depth_tx_;
+      transmittance_src_ = transmittance_tx_;
+    }
+    /* A face of the shadow maps: the opaque casters, then the transparent ones (their maps have
+     * half the resolution). */
+    auto face_render = [&](int ortho, int x, int y, int size) {
+      GPU_framebuffer_bind(shadow_fb_);
+      GPU_framebuffer_viewport_set(shadow_fb_, x, y, size, size);
+      manager.submit(shadow_ps_[ortho], shadow_view_);
+      if (!has_translucent_casters_) {
+        return;
+      }
+      GPU_framebuffer_bind(translucent_fb_);
+      GPU_framebuffer_viewport_set(translucent_fb_, x / 2, y / 2, size / 2, size / 2);
+      manager.submit(translucent_ps_[ortho], shadow_view_);
+      GPU_framebuffer_bind(transmittance_fb_);
+      GPU_framebuffer_viewport_set(transmittance_fb_, x / 2, y / 2, size / 2, size / 2);
+      manager.submit(transmit_ps_, shadow_view_);
+    };
 
     auto face_view = [](const float3 &right, const float3 &up, const float3 &forward,
                         const float3 &origin) {
@@ -1434,8 +1491,7 @@ class Instance : public DrawEngine {
       hi += margin;
       const float4x4 win = math::projection::orthographic(lo.x, hi.x, lo.y, hi.y, -hi.z, -lo.z);
       shadow_view_.sync(view, win);
-      GPU_framebuffer_viewport_set(shadow_fb_, 0, 0, shadow_atlas_height, shadow_atlas_height);
-      manager.submit(shadow_ps_[1], shadow_view_);
+      face_render(1, 0, 0, shadow_atlas_height);
 
       const float4x4 view_to_clip = win * view * viewinv;
       for (int i = 0; i < 4; i++) {
@@ -1461,8 +1517,7 @@ class Instance : public DrawEngine {
       const float extent = math::tan(half_angle) * near;
       const float4x4 win = math::projection::perspective(-extent, extent, -extent, extent, near, far);
       shadow_view_.sync(view, win);
-      GPU_framebuffer_viewport_set(shadow_fb_, 0, 0, shadow_atlas_height, shadow_atlas_height);
-      manager.submit(shadow_ps_[0], shadow_view_);
+      face_render(0, 0, 0, shadow_atlas_height);
 
       const float4x4 view_to_clip = win * view * viewinv;
       for (int i = 0; i < 4; i++) {
@@ -1486,12 +1541,7 @@ class Instance : public DrawEngine {
       const float3 &right = axes[axis == 0 ? 1 : 0];
       const float3 &up = axes[axis == 2 ? 1 : 2];
       shadow_view_.sync(face_view(right, up, forward, world_pos), win);
-      GPU_framebuffer_viewport_set(shadow_fb_,
-                                   (face % 4) * shadow_cube_size,
-                                   (face / 4) * shadow_cube_size,
-                                   shadow_cube_size,
-                                   shadow_cube_size);
-      manager.submit(shadow_ps_[0], shadow_view_);
+      face_render(0, (face % 4) * shadow_cube_size, (face / 4) * shadow_cube_size, shadow_cube_size);
     }
     shadow_params_.z = 2.5f * 2.0f / float(shadow_cube_size);
     shadow_bias_ = float4(1.0f - 0.005f, 0.0f, 0.0f, 0.0f);

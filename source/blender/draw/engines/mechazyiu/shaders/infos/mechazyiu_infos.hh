@@ -93,22 +93,9 @@ ADDITIONAL_INFO(mechazyiu_gbuffer_single_common)
 DO_STATIC_COMPILATION()
 GPU_SHADER_CREATE_END()
 
-/* Dithered transparency: depth of the covered pixels (alpha tested against noise). */
-GPU_SHADER_CREATE_INFO(mechazyiu_alpha_common)
-/* xy: half the target size in pixels, z: pixel offset of the noise, w: threshold offset (the
- * sample). The texture's alpha is the coverage when `mat_params.w` is 1. */
-PUSH_CONSTANT(float4, alpha_params)
-GPU_SHADER_CREATE_END()
-
+/* Cutouts (image alpha): depth where the alpha is 0.5 or more (alpha test). */
 GPU_SHADER_CREATE_INFO(mechazyiu_alpha_prepass)
-ADDITIONAL_INFO(mechazyiu_gbuffer_common)
-ADDITIONAL_INFO(mechazyiu_alpha_common)
-DO_STATIC_COMPILATION()
-GPU_SHADER_CREATE_END()
-
-GPU_SHADER_CREATE_INFO(mechazyiu_alpha_prepass_texture)
 ADDITIONAL_INFO(mechazyiu_gbuffer_texture_common)
-ADDITIONAL_INFO(mechazyiu_alpha_common)
 DO_STATIC_COMPILATION()
 GPU_SHADER_CREATE_END()
 
@@ -313,37 +300,41 @@ ADDITIONAL_INFO(mechazyiu_shadow_common)
 DO_STATIC_COMPILATION()
 GPU_SHADER_CREATE_END()
 
-/* Dithered transparent casters. */
-GPU_SHADER_CREATE_INFO(mechazyiu_shadow_alpha_common)
-PUSH_CONSTANT(float4, mat_base)
-PUSH_CONSTANT(float4, mat_params)
-ADDITIONAL_INFO(mechazyiu_alpha_common)
+/* Cutout casters (image alpha, alpha tested). */
+GPU_SHADER_CREATE_INFO(mechazyiu_shadow_cutout_common)
+VERTEX_IN(2, float2, au)
+SAMPLER(0, sampler2D, base_tx)
 ADDITIONAL_INFO(mechazyiu_shadow_common)
 GPU_SHADER_CREATE_END()
 
-GPU_SHADER_CREATE_INFO(mechazyiu_shadow_alpha_texture_common)
+GPU_SHADER_CREATE_INFO(mechazyiu_shadow_cutout)
+ADDITIONAL_INFO(mechazyiu_shadow_cutout_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_shadow_ortho_cutout)
+ADDITIONAL_INFO(mechazyiu_shadow_cutout_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+/* Transparent casters: the light they let through, multiplied into the transmittance map. */
+GPU_SHADER_CREATE_INFO(mechazyiu_shadow_transmit_common)
+/* a: alpha. */
+PUSH_CONSTANT(float4, mat_base)
+/* w: 1 when the alpha of the texture counts. */
+PUSH_CONSTANT(float4, mat_params)
+ADDITIONAL_INFO(mechazyiu_shadow_common)
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_shadow_transmit)
+ADDITIONAL_INFO(mechazyiu_shadow_transmit_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_shadow_transmit_texture)
 VERTEX_IN(2, float2, au)
 SAMPLER(0, sampler2D, base_tx)
-ADDITIONAL_INFO(mechazyiu_shadow_alpha_common)
-GPU_SHADER_CREATE_END()
-
-GPU_SHADER_CREATE_INFO(mechazyiu_shadow_alpha)
-ADDITIONAL_INFO(mechazyiu_shadow_alpha_common)
-DO_STATIC_COMPILATION()
-GPU_SHADER_CREATE_END()
-
-GPU_SHADER_CREATE_INFO(mechazyiu_shadow_alpha_texture)
-ADDITIONAL_INFO(mechazyiu_shadow_alpha_texture_common)
-DO_STATIC_COMPILATION()
-GPU_SHADER_CREATE_END()
-
-GPU_SHADER_CREATE_INFO(mechazyiu_shadow_ortho_alpha)
-ADDITIONAL_INFO(mechazyiu_shadow_alpha_common)
-DO_STATIC_COMPILATION()
-GPU_SHADER_CREATE_END()
-
-GPU_SHADER_CREATE_INFO(mechazyiu_shadow_ortho_alpha_texture)
-ADDITIONAL_INFO(mechazyiu_shadow_alpha_texture_common)
+ADDITIONAL_INFO(mechazyiu_shadow_transmit_common)
 DO_STATIC_COMPILATION()
 GPU_SHADER_CREATE_END()
 
@@ -352,6 +343,9 @@ GPU_SHADER_CREATE_INFO(mechazyiu_shadow_mask_common)
 SAMPLER(1, sampler2D, gb_normal_tx)
 SAMPLER(2, sampler2D, gb_depth_tx)
 SAMPLER(6, sampler2D, shadow_tx)
+/* Nearest transparent caster, and the light the transparent casters let through. */
+SAMPLER(7, sampler2D, translucent_depth_tx)
+SAMPLER(8, sampler2D, transmittance_tx)
 /* View space light position, w: 1 / far distance. */
 PUSH_CONSTANT(float4, light_position)
 /* Spot and sun: view space to the light's clip space (columns). */
