@@ -671,8 +671,11 @@ class Instance : public DrawEngine {
     if (is_render_) {
       camera_object = scene_->camera;
     }
-    else if (draw_ctx->v3d && rv3d && rv3d->persp == RV3D_CAMOB && draw_ctx->v3d->camera) {
-      camera_object = DEG_get_evaluated(draw_ctx->depsgraph, draw_ctx->v3d->camera);
+    else if (draw_ctx->v3d && rv3d && rv3d->persp == RV3D_CAMOB) {
+      /* The view's camera, or the scene's (views set to the camera without it, by scripts). */
+      Object *camera = draw_ctx->v3d->camera ? draw_ctx->v3d->camera :
+                                               DEG_get_original(scene_->camera);
+      camera_object = camera ? DEG_get_evaluated(draw_ctx->depsgraph, camera) : nullptr;
     }
     if (camera_object == nullptr || camera_object->type != OB_CAMERA) {
       return;
