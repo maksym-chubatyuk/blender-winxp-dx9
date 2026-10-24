@@ -14,6 +14,10 @@
 
 #pragma once
 
+#include <array>
+#include <memory>
+
+#include "BLI_array.hh"
 #include "BLI_math_matrix_types.hh"
 #include "BLI_math_vector_types.hh"
 #include "BLI_vector.hh"
@@ -147,13 +151,45 @@ float3 light_sample_position(const LightData &light, float2 rand);
  * World lighting reduced to first order spherical harmonics (in world space): the irradiance
  * divided by pi is `sh0 + n.x * sh1[0] + n.y * sh1[1] + n.z * sh1[2]`.
  */
-struct WorldLighting {
-  float3 sh0 = float3(0.0f);
-  float3 sh1[3] = {float3(0.0f), float3(0.0f), float3(0.0f)};
-  /** Color of the background pixels. */
-  float3 background = float3(0.0f);
+/** RGBM encoding of the environment cube: color = rgb * a * range. */
+constexpr float environment_rgbm_range = 16.0f;
+
+/** A cube map: RGBM encoded faces in the order and orientation of Direct3D cube maps. */
+struct EnvironmentCube {
+  int size = 0;
+  /** Per mip level, the 6 faces of RGBA bytes (sizes halve). */
+  Vector<Array<uchar>> levels;
 };
 
+/**
+ * The environment for the reflections of increasing roughness (0, 1/3, 2/3: blurred more), and
+ * its irradiance / pi (diffuse lighting, and the roughest reflections).
+ */
+struct EnvironmentMaps {
+  std::array<EnvironmentCube, 4> cubes;
+};
+
+struct WorldLighting {
+  /** Spherical harmonics in the environment's space. */
+  float3 sh0 = float3(0.0f);
+  float3 sh1[3] = {float3(0.0f), float3(0.0f), float3(0.0f)};
+  /** Color of the background pixels (uniform worlds, or no visible environment). */
+  float3 background = float3(0.0f);
+  /** The environment image (not rotated, strength 1); null for uniform worlds. */
+  std::shared_ptr<const EnvironmentMaps> maps;
+  /** Multiplies the maps and the spherical harmonics. */
+  float strength = 1.0f;
+  /** Rotation of the environment around Z (the maps and spherical harmonics aren't rotated). */
+  float rotation_z = 0.0f;
+  /** The environment turns with the view (studio lights not in world space). */
+  bool view_space = false;
+  /** Visibility of the environment as background (studio lights) and its blur (EEVEE's). */
+  float background_opacity = 1.0f;
+  float background_blur = 0.0f;
+};
+
+/** Cubes of one texel per face, of `color`. */
+std::shared_ptr<EnvironmentMaps> environment_maps_uniform(const float3 &color);
 WorldLighting world_lighting_get(const World *world);
 /** Material preview: the studio light of the viewport. */
 WorldLighting world_lighting_studio_get(const View3D &v3d);

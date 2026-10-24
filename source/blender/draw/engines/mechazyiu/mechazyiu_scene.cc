@@ -501,44 +501,178 @@ float3 light_sample_position(const LightData &light, float2 rand)
  * \{ */
 
 /**
- * First order spherical harmonics of an equirectangular radiance image (Cycles mapping):
- * sh0 = mean radiance, sh1 = sum(L * dir * solid angle) / (2 pi), so that sh0 + sh1 . n is the
- * irradiance divided by pi.
+ * Direction of a point of an equirectangular image (Cycles mapping), u and v in [0, 1], v = 0 at
+ * the bottom.
  */
-static WorldLighting world_lighting_from_image(ImBuf *ibuf, float strength, float rotation_z)
+static float3 equirect_direction(float u, float v)
 {
-  WorldLighting world;
-  if (ibuf == nullptr || ibuf->x < 2 || ibuf->y < 2) {
-    return world;
+  const float phi = (0.5f - u) * 2.0f * float(M_PI);
+  const float elevation = (v - 0.5f) * float(M_PI);
+  return float3(math::cos(phi) * math::cos(elevation),
+                math::sin(phi) * math::cos(elevation),
+                math::sin(elevation));
+}
+
+/** Scene linear colors of an equirectangular image, row 0 at the bottom. */
+struct LinearImage {
+  int width = 0;
+  int height = 0;
+  Array<float3> pixels;
+
+  float3 &at(int x, int y)
+  {
+    return pixels[size_t(y) * width + x];
   }
-  /* At most 256 x 128 samples, the low frequencies don't need more. */
-  const int step = math::max(1, math::max(ibuf->x / 256, ibuf->y / 128));
-  const float cos_r = math::cos(rotation_z), sin_r = math::sin(rotation_z);
-  double sum[4][3] = {};
-  double total_weight = 0.0;
-  for (int y = step / 2; y < ibuf->y; y += step) {
-    const float elevation = (float(y) + 0.5f) / float(ibuf->y) * float(M_PI) - float(M_PI_2);
-    const float cos_e = math::cos(elevation);
-    const float weight = cos_e;
-    for (int x = step / 2; x < ibuf->x; x += step) {
-      const float phi = ((float(x) + 0.5f) / float(ibuf->x) - 0.5f) * 2.0f * float(M_PI);
-      float3 dir(-math::cos(phi) * cos_e, math::sin(phi) * cos_e, math::sin(elevation));
-      dir = float3(dir.x * cos_r - dir.y * sin_r, dir.x * sin_r + dir.y * cos_r, dir.z);
+  const float3 &at(int x, int y) const
+  {
+    return pixels[size_t(y) * width + x];
+  }
+
+  /** Bilinear, the horizontal direction wraps around. */
+  float3 sample(const float3 &dir) const
+  {
+    const float u = 0.5f - math::atan2(dir.y, dir.x) / (2.0f * float(M_PI));
+    const float v = 0.5f + math::asin(math::clamp(dir.z, -1.0f, 1.0f)) / float(M_PI);
+    const float x = u * width - 0.5f, y = math::clamp(v * height - 0.5f, 0.0f, height - 1.0f);
+    const int x0 = int(math::floor(x)), y0 = int(y);
+    const float fx = x - float(x0), fy = y - float(y0);
+    const int y1 = math::min(y0 + 1, height - 1);
+    auto wrap = [&](int px) { return ((px % width) + width) % width; };
+    return math::interpolate(math::interpolate(at(wrap(x0), y0), at(wrap(x0 + 1), y0), fx),
+                             math::interpolate(at(wrap(x0), y1), at(wrap(x0 + 1), y1), fx),
+                             fy);
+  }
+
+  /** Average of the pixels covering each pixel of a `w` x `h` image (no larger than this). */
+  LinearImage downsample(int w, int h) const
+  {
+    LinearImage result;
+    result.width = w;
+    result.height = h;
+    result.pixels = Array<float3>(size_t(w) * h, float3(0.0f));
+    Array<int> counts(size_t(w) * h, 0);
+    for (int y = 0; y < height; y++) {
+      for (int x = 0; x < width; x++) {
+        const size_t i = size_t(y * h / height) * w + size_t(x * w / width);
+        result.pixels[i] += at(x, y);
+        counts[i]++;
+      }
+    }
+    for (const int64_t i : result.pixels.index_range()) {
+      result.pixels[i] /= float(math::max(counts[i], 1));
+    }
+    return result;
+  }
+
+  /**
+   * Gaussian blur of `sigma` radians, separable: the horizontal kernel widens toward the poles
+   * (a horizontal pixel covers less angle there).
+   */
+  void blur(float sigma)
+  {
+    const float pixel_angle = float(M_PI) / height;
+    Array<float3> line(math::max(width, height));
+    Vector<float> kernel;
+    auto kernel_build = [&](float sigma_px, int max_radius) {
+      const int radius = math::min(int(math::ceil(sigma_px * 3.0f)), max_radius);
+      kernel.resize(radius + 1);
+      for (int i = 0; i <= radius; i++) {
+        kernel[i] = math::exp(-0.5f * float(i * i) / (sigma_px * sigma_px));
+      }
+      return radius;
+    };
+    /* Vertical, clamped at the poles. */
+    const int radius_v = kernel_build(math::max(sigma / pixel_angle, 0.5f), height - 1);
+    for (int x = 0; x < width; x++) {
+      for (int y = 0; y < height; y++) {
+        float3 sum(0.0f);
+        float total = 0.0f;
+        for (int i = -radius_v; i <= radius_v; i++) {
+          const int py = y + i;
+          if (py >= 0 && py < height) {
+            sum += at(x, py) * kernel[math::abs(i)];
+            total += kernel[math::abs(i)];
+          }
+        }
+        line[y] = sum / total;
+      }
+      for (int y = 0; y < height; y++) {
+        at(x, y) = line[y];
+      }
+    }
+    /* Horizontal, wrapping around. */
+    for (int y = 0; y < height; y++) {
+      const float elevation = (float(y) + 0.5f) / height * float(M_PI) - float(M_PI_2);
+      const float sigma_px = math::max(
+          sigma / (2.0f * float(M_PI) / width * math::max(math::cos(elevation), 0.01f)), 0.5f);
+      const int radius = kernel_build(sigma_px, width / 2);
+      for (int x = 0; x < width; x++) {
+        float3 sum(0.0f);
+        float total = 0.0f;
+        for (int i = -radius; i <= radius; i++) {
+          sum += at(((x + i) % width + width) % width, y) * kernel[math::abs(i)];
+          total += kernel[math::abs(i)];
+        }
+        line[x] = sum / total;
+      }
+      for (int x = 0; x < width; x++) {
+        at(x, y) = line[x];
+      }
+    }
+  }
+};
+
+static LinearImage linear_image_get(ImBuf *ibuf, int max_width)
+{
+  LinearImage image;
+  if (ibuf == nullptr || ibuf->x < 2 || ibuf->y < 2 ||
+      !(ibuf->float_buffer.data || ibuf->byte_buffer.data))
+  {
+    return image;
+  }
+  const int step = math::max(1, (ibuf->x + max_width - 1) / max_width);
+  image.width = ibuf->x / step;
+  image.height = math::max(1, ibuf->y / step);
+  image.pixels.reinitialize(size_t(image.width) * image.height);
+  for (int y = 0; y < image.height; y++) {
+    for (int x = 0; x < image.width; x++) {
+      const size_t index = size_t(y * step) * ibuf->x + size_t(x * step);
       float4 pixel;
-      const size_t index = size_t(y) * ibuf->x + x;
       if (ibuf->float_buffer.data) {
         const float *p = ibuf->float_buffer.data + index * ibuf->channels;
-        pixel = float4(p[0], ibuf->channels > 1 ? p[1] : p[0], ibuf->channels > 2 ? p[2] : p[0], 1.0f);
+        pixel = float4(p[0],
+                       ibuf->channels > 1 ? p[1] : p[0],
+                       ibuf->channels > 2 ? p[2] : p[0],
+                       1.0f);
       }
-      else if (ibuf->byte_buffer.data) {
+      else {
         const uchar *p = ibuf->byte_buffer.data + index * 4;
         pixel = float4(p[0], p[1], p[2], 255.0f) / 255.0f;
         IMB_colormanagement_colorspace_to_scene_linear_v4(
             pixel, false, ibuf->byte_buffer.colorspace);
       }
-      else {
-        continue;
-      }
+      image.at(x, y) = float3(pixel);
+    }
+  }
+  return image;
+}
+
+/**
+ * First order spherical harmonics of an equirectangular radiance image:
+ * sh0 = mean radiance, sh1 = sum(L * dir * solid angle) / (2 pi), so that sh0 + sh1 . n is the
+ * irradiance divided by pi. `image` is small (the low frequencies don't need more).
+ */
+static WorldLighting world_lighting_from_image(const LinearImage &image)
+{
+  WorldLighting world;
+  double sum[4][3] = {};
+  double total_weight = 0.0;
+  for (int y = 0; y < image.height; y++) {
+    const float v = (float(y) + 0.5f) / image.height;
+    const float weight = math::cos((v - 0.5f) * float(M_PI));
+    for (int x = 0; x < image.width; x++) {
+      const float3 dir = equirect_direction((float(x) + 0.5f) / image.width, v);
+      const float3 &pixel = image.at(x, y);
       for (int c = 0; c < 3; c++) {
         const double l = double(pixel[c]) * weight;
         sum[0][c] += l;
@@ -553,8 +687,8 @@ static WorldLighting world_lighting_from_image(ImBuf *ibuf, float strength, floa
     return world;
   }
   /* total_weight covers 4 pi steradians. */
-  const double to_mean = strength / total_weight;
-  const double to_sh1 = strength * 4.0 * M_PI / total_weight / (2.0 * M_PI);
+  const double to_mean = 1.0 / total_weight;
+  const double to_sh1 = 4.0 * M_PI / total_weight / (2.0 * M_PI);
   for (int c = 0; c < 3; c++) {
     world.sh0[c] = float(sum[0][c] * to_mean);
     for (int axis = 0; axis < 3; axis++) {
@@ -563,6 +697,199 @@ static WorldLighting world_lighting_from_image(ImBuf *ibuf, float strength, floa
   }
   world.background = world.sh0;
   return world;
+}
+
+/** Direction of a texel of a cube face, `s` and `t` in [-1, 1] (Direct3D cube map layout). */
+static float3 cube_direction(int face, float s, float t)
+{
+  switch (face) {
+    case 0:
+      return float3(1.0f, -t, -s);
+    case 1:
+      return float3(-1.0f, -t, s);
+    case 2:
+      return float3(s, 1.0f, t);
+    case 3:
+      return float3(s, -1.0f, -t);
+    case 4:
+      return float3(s, -t, 1.0f);
+    default:
+      return float3(-s, -t, -1.0f);
+  }
+}
+
+/** Iterates the texels of the 6 faces of a cube level, with their direction (normalized). */
+template<typename Fn> static void cube_texels(int size, Fn fn)
+{
+  for (int face = 0; face < 6; face++) {
+    for (int y = 0; y < size; y++) {
+      for (int x = 0; x < size; x++) {
+        const float s = (float(x) + 0.5f) / size * 2.0f - 1.0f;
+        const float t = (float(y) + 0.5f) / size * 2.0f - 1.0f;
+        fn((size_t(face) * size + y) * size + x, math::normalize(cube_direction(face, s, t)));
+      }
+    }
+  }
+}
+
+static void rgbm_encode(const float3 &color, uchar *r_rgba)
+{
+  const float m = math::clamp(math::reduce_max(color) / environment_rgbm_range, 1e-6f, 1.0f);
+  const float a = math::ceil(m * 255.0f) / 255.0f;
+  const float3 rgb = math::clamp(color / (a * environment_rgbm_range), 0.0f, 1.0f);
+  r_rgba[0] = uchar(rgb.x * 255.0f + 0.5f);
+  r_rgba[1] = uchar(rgb.y * 255.0f + 0.5f);
+  r_rgba[2] = uchar(rgb.z * 255.0f + 0.5f);
+  r_rgba[3] = uchar(a * 255.0f + 0.5f);
+}
+
+static Array<uchar> rgbm_encode(const Span<float3> colors)
+{
+  Array<uchar> bytes(colors.size() * 4);
+  for (const int64_t i : colors.index_range()) {
+    rgbm_encode(colors[i], &bytes[i * 4]);
+  }
+  return bytes;
+}
+
+/** A cube of `size` texels per face from an image, mip levels by averaging down to `min_size`. */
+static EnvironmentCube environment_cube_build(const LinearImage &image, int size, int min_size)
+{
+  EnvironmentCube cube;
+  cube.size = size;
+  Array<float3> level(size_t(6) * size * size);
+  cube_texels(size, [&](size_t index, const float3 &d) { level[index] = image.sample(d); });
+  for (int level_size = size;; level_size /= 2) {
+    cube.levels.append(rgbm_encode(level));
+    if (level_size <= min_size) {
+      break;
+    }
+    const int half = level_size / 2;
+    Array<float3> next(size_t(6) * half * half);
+    for (int face = 0; face < 6; face++) {
+      for (int y = 0; y < half; y++) {
+        for (int x = 0; x < half; x++) {
+          auto at = [&](int px, int py) {
+            return level[(size_t(face) * level_size + py) * level_size + px];
+          };
+          next[(size_t(face) * half + y) * half + x] = (at(2 * x, 2 * y) + at(2 * x + 1, 2 * y) +
+                                                        at(2 * x, 2 * y + 1) +
+                                                        at(2 * x + 1, 2 * y + 1)) *
+                                                       0.25f;
+        }
+      }
+    }
+    level = std::move(next);
+  }
+  return cube;
+}
+
+/** Cube of the cosine weighted integral of the radiance divided by pi (irradiance / pi). */
+static EnvironmentCube irradiance_cube_build(const LinearImage &image, int size)
+{
+  const LinearImage small = image.downsample(64, 32);
+  Array<float3> directions(small.pixels.size());
+  Array<float> weights(small.pixels.size());
+  for (int y = 0; y < small.height; y++) {
+    const float v = (float(y) + 0.5f) / small.height;
+    for (int x = 0; x < small.width; x++) {
+      directions[y * small.width + x] = equirect_direction((float(x) + 0.5f) / small.width, v);
+      /* Solid angle / pi. */
+      weights[y * small.width + x] = (2.0f * float(M_PI) / small.width) *
+                                     (float(M_PI) / small.height) *
+                                     math::cos((v - 0.5f) * float(M_PI)) / float(M_PI);
+    }
+  }
+  Array<float3> texels(size_t(6) * size * size);
+  cube_texels(size, [&](size_t index, const float3 &n) {
+    float3 sum(0.0f);
+    for (const int64_t i : small.pixels.index_range()) {
+      const float cos_theta = math::dot(n, directions[i]);
+      if (cos_theta > 0.0f) {
+        sum += small.pixels[i] * (cos_theta * weights[i]);
+      }
+    }
+    texels[index] = sum;
+  });
+  EnvironmentCube cube;
+  cube.size = size;
+  cube.levels.append(rgbm_encode(texels));
+  return cube;
+}
+
+/** Width of the blur of the reflections of a roughness: about the GGX lobe's (radians). */
+static float roughness_blur(float roughness)
+{
+  return 1.1f * roughness * roughness;
+}
+
+static std::shared_ptr<EnvironmentMaps> environment_maps_build(const LinearImage &image)
+{
+  std::shared_ptr<EnvironmentMaps> maps = std::make_shared<EnvironmentMaps>();
+  /* Sharp: as sharp as the image, mip levels for distant or curved surfaces. */
+  maps->cubes[0] = environment_cube_build(image, image.width >= 1024 ? 512 : 256, 16);
+  /* Blurred: texels about half the blur wide. */
+  LinearImage glossy = image.downsample(256, 128);
+  glossy.blur(roughness_blur(1.0f / 3.0f));
+  maps->cubes[1] = environment_cube_build(glossy, 32, 8);
+  LinearImage rough = image.downsample(64, 32);
+  rough.blur(roughness_blur(2.0f / 3.0f));
+  /* Large enough that the edges of the faces (not filtered across) don't show. */
+  maps->cubes[2] = environment_cube_build(rough, 16, 16);
+  maps->cubes[3] = irradiance_cube_build(image, 32);
+  return maps;
+}
+
+std::shared_ptr<EnvironmentMaps> environment_maps_uniform(const float3 &color)
+{
+  std::shared_ptr<EnvironmentMaps> maps = std::make_shared<EnvironmentMaps>();
+  for (EnvironmentCube &cube : maps->cubes) {
+    cube.size = 1;
+    Array<uchar> bytes(6 * 4);
+    for (int face = 0; face < 6; face++) {
+      rgbm_encode(color, &bytes[face * 4]);
+    }
+    cube.levels.append(std::move(bytes));
+  }
+  return maps;
+}
+
+/**
+ * Lighting and cubes of an environment image, kept while the image buffer is the same (they take
+ * long on old CPUs).
+ */
+static WorldLighting environment_lighting_get(ImBuf *ibuf, const void *source)
+{
+  static const void *cached_source = nullptr;
+  static const ImBuf *cached_ibuf = nullptr;
+  static int cached_size[2] = {0, 0};
+  static WorldLighting cached;
+  if (source != cached_source || ibuf != cached_ibuf || ibuf == nullptr ||
+      ibuf->x != cached_size[0] || ibuf->y != cached_size[1])
+  {
+    /* 2048 wide: the largest texture of the R300, and as sharp as its cube faces. */
+    const LinearImage image = linear_image_get(ibuf, 2048);
+    cached = WorldLighting();
+    if (image.width > 0) {
+      cached = world_lighting_from_image(image.downsample(256, 128));
+      cached.maps = environment_maps_build(image);
+    }
+    cached_source = source;
+    cached_ibuf = ibuf;
+    cached_size[0] = ibuf ? ibuf->x : 0;
+    cached_size[1] = ibuf ? ibuf->y : 0;
+  }
+  return cached;
+}
+
+static void world_scale(WorldLighting &world, float strength)
+{
+  world.sh0 *= strength;
+  for (float3 &sh : world.sh1) {
+    sh *= strength;
+  }
+  world.background *= strength;
+  world.strength *= strength;
 }
 
 static WorldLighting world_lighting_uniform(float3 color)
@@ -600,8 +927,18 @@ WorldLighting world_lighting_get(const World *world)
       ImageUser iuser = storage->iuser;
       void *lock;
       ImBuf *ibuf = BKE_image_acquire_ibuf(image, &iuser, &lock);
-      WorldLighting result = world_lighting_from_image(ibuf, strength, 0.0f);
+      WorldLighting result = environment_lighting_get(ibuf, image);
       BKE_image_release_ibuf(image, ibuf, lock);
+      world_scale(result, strength);
+      /* A Mapping node turning the image around Z (it rotates the lookup direction, the
+       * environment turns the other way). */
+      const bNodeSocket *vector_link = input_link_get(input_find(env, "Vector"));
+      if (vector_link && vector_link->owner_node().type_legacy == SH_NODE_MAPPING) {
+        const bNodeSocket *rotation = input_find(vector_link->owner_node(), "Rotation");
+        if (rotation && rotation->type == SOCK_VECTOR && !input_link_get(rotation)) {
+          result.rotation_z = -rotation->default_value_typed<bNodeSocketValueVector>()->value[2];
+        }
+      }
       return result;
     }
   }
@@ -615,23 +952,14 @@ WorldLighting world_lighting_studio_get(const View3D &v3d)
     return world_lighting_uniform(float3(0.05f));
   }
   BKE_studiolight_ensure_flag(sl, STUDIOLIGHT_EXTERNAL_IMAGE_LOADED);
-  /* The image is the same for every redraw: compute it once. */
-  static const StudioLight *cached_light = nullptr;
-  static float cached_rotation = 0.0f;
-  static WorldLighting cached;
-  if (cached_light != sl || cached_rotation != v3d.shading.studiolight_rot_z) {
-    cached = world_lighting_from_image(
-        sl->equirect_radiance_buffer, 1.0f, v3d.shading.studiolight_rot_z);
-    cached_light = sl;
-    cached_rotation = v3d.shading.studiolight_rot_z;
-  }
-  WorldLighting world = cached;
-  const float intensity = v3d.shading.studiolight_intensity;
-  world.sh0 *= intensity;
-  for (float3 &sh : world.sh1) {
-    sh *= intensity;
-  }
-  world.background = world.sh0;
+  WorldLighting world = environment_lighting_get(sl->equirect_radiance_buffer, sl);
+  /* Like EEVEE's look-dev world: the lookups turn by the angle. */
+  world.rotation_z = -v3d.shading.studiolight_rot_z;
+  world.view_space = (v3d.shading.flag & V3D_SHADING_STUDIOLIGHT_VIEW_ROTATION) != 0;
+  world_scale(world, v3d.shading.studiolight_intensity);
+  /* Like EEVEE's material preview: the studio light blurred, partly visible. */
+  world.background_opacity = v3d.shading.studiolight_background;
+  world.background_blur = v3d.shading.studiolight_blur;
   return world;
 }
 

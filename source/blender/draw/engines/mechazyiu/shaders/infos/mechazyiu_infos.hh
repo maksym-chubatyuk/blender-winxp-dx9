@@ -246,12 +246,17 @@ GPU_SHADER_CREATE_END()
 /* First pass of a sample: world light, emission and the background. */
 GPU_SHADER_CREATE_INFO(mechazyiu_base)
 SAMPLER(5, sampler2D, material_tx)
-/* World lighting, first order spherical harmonics of the irradiance divided by pi:
- * E(n) / pi = world_sh[0] + n.x * world_sh[1] + n.y * world_sh[2] + n.z * world_sh[3] (in view
- * space). world_sh[0].a: 1 when the background is transparent. */
-PUSH_CONSTANT_ARRAY(float4, world_sh, 4)
-/* Background color (rgb). */
-PUSH_CONSTANT(float4, background)
+/* The environment, RGBM encoded: as reflected by roughness 0, 1/3 and 2/3 (blurred), and its
+ * irradiance / pi (diffuse lighting, roughness 1). */
+SAMPLER(6, samplerCube, world_tx)
+SAMPLER(7, samplerCube, world_glossy_tx)
+SAMPLER(8, samplerCube, world_rough_tx)
+SAMPLER(9, samplerCube, irradiance_tx)
+/* Rows of the rotation of view directions to directions of the environment. */
+PUSH_CONSTANT_ARRAY(float4, world_rotation, 3)
+/* x: RGBM range times the strength, y: unused, z: roughness of the background's blur,
+ * w: opacity of the background (premultiplied alpha, 0 when the film is transparent). */
+PUSH_CONSTANT(float4, world_params)
 ADDITIONAL_INFO(mechazyiu_gbuffer_read)
 DO_STATIC_COMPILATION()
 GPU_SHADER_CREATE_END()

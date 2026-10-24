@@ -449,13 +449,22 @@ class Instance : public DrawEngine {
   Framebuffer output_fb_ = {"mechazyiu.output"};
 
   Texture material_tx_ = {"mechazyiu.materials"};
+  /** The environment (`world_.maps`, or 1 x 1 cubes of a uniform world's color). */
+  Texture world_tx_[4] = {{"mechazyiu.world"},
+                          {"mechazyiu.world_glossy"},
+                          {"mechazyiu.world_rough"},
+                          {"mechazyiu.world_irradiance"}};
+  std::shared_ptr<const EnvironmentMaps> world_maps_;
+  float3 world_maps_color_ = float3(-1.0f);
+  /** View to environment direction (rows), see `mechazyiu_base`. */
+  float4 world_rotation_[3] = {};
+  float4 world_params_ = float4(0.0f);
 
   /* Values read by the passes when they are submitted. */
   float4 rect_ = float4(-1.0f, -1.0f, 1.0f, 1.0f);
   float4 proj_ = float4(0.0f);
   float4 proj_type_ = float4(0.0f);
   float4 world_sh_[4] = {};
-  float4 background_ = float4(0.0f);
   float4 gbuffer_target_ = float4(1.0f, 0.0f, 0.0f, 0.0f);
   gpu::Texture *forward_src_ = nullptr;
   float4 forward_light_position_ = float4(0.0f);
@@ -516,6 +525,7 @@ class Instance : public DrawEngine {
     transparent_ = use_scene_world_ && scene_->r.alphamode == R_ALPHAPREMUL;
     world_ = use_scene_world_ ? world_lighting_get(scene_->world) :
                                 world_lighting_studio_get(*v3d);
+    world_texture_ensure();
   }
 
   void begin_sync() final
@@ -567,8 +577,17 @@ class Instance : public DrawEngine {
     screen_pass(base_ps_, shaders.base.get());
     gbuffer_read(base_ps_);
     base_ps_.bind_texture("material_tx", &material_tx_);
-    base_ps_.push_constant("world_sh", world_sh_, 4);
-    base_ps_.push_constant("background", &background_);
+    {
+      const GPUSamplerState sampler = {GPU_SAMPLER_FILTERING_LINEAR | GPU_SAMPLER_FILTERING_MIPMAP,
+                                       GPU_SAMPLER_EXTEND_MODE_EXTEND,
+                                       GPU_SAMPLER_EXTEND_MODE_EXTEND};
+      const char *names[4] = {"world_tx", "world_glossy_tx", "world_rough_tx", "irradiance_tx"};
+      for (int i = 0; i < 4; i++) {
+        base_ps_.bind_texture(names[i], &world_tx_[i], sampler);
+      }
+    }
+    base_ps_.push_constant("world_rotation", world_rotation_, 3);
+    base_ps_.push_constant("world_params", &world_params_);
     base_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 6);
 
     for (int type = 0; type < light_type_len; type++) {
@@ -959,6 +978,41 @@ class Instance : public DrawEngine {
    * targets beyond it would be placed in AGP memory by the driver (5 times slower on the Radeon
    * 9600): their write rate is measured, and the tiles shrink when some were.
    */
+  /** Uploads the environment maps when they changed (they stay the same while cached). */
+  void world_texture_ensure()
+  {
+    std::shared_ptr<const EnvironmentMaps> maps = world_.maps;
+    if (maps) {
+      if (maps == world_maps_ && world_tx_[0].is_valid()) {
+        return;
+      }
+      world_maps_color_ = float3(-1.0f);
+    }
+    else {
+      /* Uniform world: its color is the cubes', strength 1. */
+      if (!world_maps_ && world_tx_[0].is_valid() &&
+          math::is_equal(world_maps_color_, world_.background, 0.0f))
+      {
+        return;
+      }
+      world_maps_color_ = world_.background;
+      maps = environment_maps_uniform(world_.background);
+    }
+    world_maps_ = world_.maps;
+    for (int i = 0; i < 4; i++) {
+      const EnvironmentCube &cube = maps->cubes[i];
+      world_tx_[i].free();
+      world_tx_[i].ensure_cube(gpu::TextureFormat::UNORM_8_8_8_8,
+                               cube.size,
+                               GPU_TEXTURE_USAGE_SHADER_READ,
+                               nullptr,
+                               cube.levels.size());
+      for (const int level : cube.levels.index_range()) {
+        GPU_texture_update_mipmap(world_tx_[i], level, GPU_DATA_UBYTE, cube.levels[level].data());
+      }
+    }
+  }
+
   void tiles_ensure(int2 size, bool viewport)
   {
     int64_t available = GPU_render_target_budget();
@@ -1243,16 +1297,35 @@ class Instance : public DrawEngine {
 
     /* World, emission, background. */
     rect_ = float4(-1.0f, -1.0f, 1.0f, 1.0f);
-    const float3x3 rotation = float3x3(viewmat);
-    world_sh_[0] = float4(world_.sh0, transparent_ ? 1.0f : 0.0f);
-    for (int axis = 0; axis < 3; axis++) {
-      float3 sh(0.0f);
-      for (int j = 0; j < 3; j++) {
-        sh += world_.sh1[j] * rotation[j][axis];
+    {
+      /* Rows of the view to environment rotation: to world space (or, for studio lights
+       * following the view, like EEVEE: x right, y toward the viewer, z up), then the
+       * environment's rotation. */
+      const float3x3 rotation = float3x3(viewmat);
+      const float3 base[3] = {world_.view_space ? float3(1.0f, 0.0f, 0.0f) : rotation[0],
+                              world_.view_space ? float3(0.0f, 0.0f, 1.0f) : rotation[1],
+                              world_.view_space ? float3(0.0f, 1.0f, 0.0f) : rotation[2]};
+      const float c = math::cos(world_.rotation_z), s = math::sin(world_.rotation_z);
+      const float3 rows[3] = {base[0] * c + base[1] * s, base[1] * c - base[0] * s, base[2]};
+      for (int i = 0; i < 3; i++) {
+        world_rotation_[i] = float4(rows[i], 0.0f);
       }
-      world_sh_[axis + 1] = float4(sh, 0.0f);
+      /* Spherical harmonics in view space: sh . (rows * d) = (sum of sh[i] * rows[i]) . d. */
+      world_sh_[0] = float4(world_.sh0, 0.0f);
+      for (int axis = 0; axis < 3; axis++) {
+        float3 sh(0.0f);
+        for (int j = 0; j < 3; j++) {
+          sh += world_.sh1[j] * rows[j][axis];
+        }
+        world_sh_[axis + 1] = float4(sh, 0.0f);
+      }
+      /* The background like EEVEE's: blurred like reflections (EEVEE's roughness blur^2 looks
+       * like roughness blur here), faded to transparent. */
+      world_params_ = float4(environment_rgbm_range * world_.strength,
+                             0.0f,
+                             world_.background_blur,
+                             transparent_ ? 0.0f : world_.background_opacity);
     }
-    background_ = float4(world_.background, 0.0f);
     bind(accum_fb_[cur_]);
     manager.submit(base_ps_);
 
@@ -1645,11 +1718,17 @@ class Instance : public DrawEngine {
     uint64_t settings = uint64_t(use_scene_lights_) | uint64_t(use_scene_world_) << 1;
     if (draw_ctx->v3d) {
       const View3DShading &shading = draw_ctx->v3d->shading;
-      uint32_t rotation, intensity;
-      memcpy(&rotation, &shading.studiolight_rot_z, sizeof(rotation));
-      memcpy(&intensity, &shading.studiolight_intensity, sizeof(intensity));
+      const float values[4] = {shading.studiolight_rot_z,
+                               shading.studiolight_intensity,
+                               shading.studiolight_background,
+                               shading.studiolight_blur};
       settings ^= std::hash<std::string>{}(shading.lookdev_light) ^ uint64_t(shading.type) << 2 ^
-                  uint64_t(rotation) << 8 ^ uint64_t(intensity) << 24;
+                  uint64_t(shading.flag & V3D_SHADING_STUDIOLIGHT_VIEW_ROTATION) << 3;
+      for (int i = 0; i < 4; i++) {
+        uint32_t bits;
+        memcpy(&bits, &values[i], sizeof(bits));
+        settings ^= uint64_t(bits) << (8 + i * 13);
+      }
     }
     if (update != last_update_ || persmat != last_persmat_ || size != last_size_ ||
         settings != last_settings_)
