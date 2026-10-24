@@ -123,6 +123,7 @@ set(SRC
   engines/eevee/eevee_view.cc
   engines/eevee/eevee_volume.cc
   engines/eevee/eevee_world.cc
+  engines/mechazyiu/mechazyiu_bloom.cc
   engines/mechazyiu/mechazyiu_engine.cc
   engines/mechazyiu/mechazyiu_scene.cc
   engines/workbench/workbench_effect_antialiasing.cc

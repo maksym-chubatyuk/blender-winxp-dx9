@@ -4,7 +4,7 @@
 
 /**
  * MECHAZYIU rectangle copy (`mechazyiu_copy`), the viewport output (`mechazyiu_output`, define
- * OUTPUT: the running mean and the depth of the G-buffer for the overlays) and the mix of a sample
+ * OUTPUT: the running mean, and the depth of the G-buffer for the overlays; BLOOM: plus the bloom) and the mix of a sample
  * into the running mean (`mechazyiu_mix`, define MIX).
  */
 
@@ -18,6 +18,12 @@ float4 uv_transform;
 #ifdef OUTPUT
 sampler2D depth_tx : register(s1);
 float4 depth_proj;
+#  ifdef BLOOM
+#    include "mechazyiu_bloom_lib.hlsl"
+/* The bloom at half the resolution (RGBM). */
+sampler2D bloom_tx : register(s2);
+float4 bloom_color;
+#  endif
 
 struct FragOut {
   float4 color : COLOR0;
@@ -28,6 +34,9 @@ FragOut frag(VertOut v)
 {
   FragOut o;
   o.color = tex2D(source_tx, v.uv);
+#  ifdef BLOOM
+  o.color.rgb += mechazyiu_rgbm_decode(tex2D(bloom_tx, v.uv)) * bloom_color.rgb;
+#  endif
   float depth = tex2D(depth_tx, v.uv * uv_transform.xy + uv_transform.zw).x;
   /* Linear depth to the depth buffer of the (not jittered) viewport projection. */
   float persp = depth_proj.z;

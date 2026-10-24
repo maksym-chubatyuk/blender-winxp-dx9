@@ -163,4 +163,8 @@ mechazyiu_forward_light_blend                      mechazyiu_forward.hlsl LIGHT 
 mechazyiu_forward_light_texture_blend              mechazyiu_forward.hlsl LIGHT TEXTURE BLEND
 mechazyiu_copy                                     mechazyiu_copy.hlsl
 mechazyiu_output                                   mechazyiu_copy.hlsl OUTPUT
+mechazyiu_output_bloom                             mechazyiu_copy.hlsl OUTPUT BLOOM
 mechazyiu_mix                                      mechazyiu_copy.hlsl MIX
+mechazyiu_bloom_prefilter                          mechazyiu_bloom.hlsl PREFILTER
+mechazyiu_bloom_downsample                         mechazyiu_bloom.hlsl DOWNSAMPLE
+mechazyiu_bloom_upsample                           mechazyiu_bloom.hlsl UPSAMPLE

@@ -19,6 +19,7 @@
 
 #include "BLI_array.hh"
 #include "BLI_math_matrix_types.hh"
+#include "BLI_span.hh"
 #include "BLI_math_vector_types.hh"
 #include "BLI_vector.hh"
 
@@ -140,6 +141,44 @@ LightData light_data_get(const Object &ob, float light_threshold);
 
 /** Position (or direction toward a sun) for one sample: a point of the light's shape. */
 float3 light_sample_position(const LightData &light, float2 rand);
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Bloom
+ * \{ */
+
+constexpr int bloom_levels_max = 16;
+
+/** Like EEVEE Legacy's (`Scene.mechazyiu`). */
+struct BloomSettings {
+  bool enabled = false;
+  float threshold = 0.8f;
+  float knee = 0.5f;
+  float radius = 6.5f;
+  float intensity = 0.05f;
+  float clamp = 0.0f;
+  float3 color = float3(1.0f);
+
+  /** Threshold - knee, knee * 2, 0.25 / knee, threshold. */
+  float4 curve() const
+  {
+    return float4(
+        threshold - knee, knee * 2.0f, 0.25f / math::max(knee, 1e-5f), threshold);
+  }
+};
+
+struct BloomLevels {
+  /** Levels below half the resolution. */
+  int len = 1;
+  /** Distance of the tent filter's samples (texels). */
+  float sample_scale = 1.0f;
+};
+
+BloomLevels bloom_levels_get(int2 size, float radius);
+float3 bloom_prefilter(float3 color, const BloomSettings &settings);
+/** Adds the bloom to a final render (scene linear, premultiplied alpha). */
+void bloom_apply(MutableSpan<float4> pixels, int2 size, const BloomSettings &settings);
 
 /** \} */
 

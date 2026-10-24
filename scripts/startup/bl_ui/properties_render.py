@@ -833,6 +833,35 @@ class RENDER_PT_mechazyiu_ambient_occlusion(RenderButtonsPanel, Panel):
         col.prop(props, "use_bounce_light")
 
 
+class RENDER_PT_mechazyiu_bloom(RenderButtonsPanel, Panel):
+    bl_label = "Bloom"
+    bl_options = {'DEFAULT_CLOSED'}
+    COMPAT_ENGINES = {'BLENDER_MECHAZYIU'}
+
+    @classmethod
+    def poll(cls, context):
+        return (context.engine in cls.COMPAT_ENGINES)
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.mechazyiu, "use_bloom", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+
+        props = context.scene.mechazyiu
+        layout.active = props.use_bloom
+
+        col = layout.column()
+        col.prop(props, "bloom_threshold")
+        col.prop(props, "bloom_knee")
+        col.prop(props, "bloom_radius")
+        col.prop(props, "bloom_color")
+        col.prop(props, "bloom_intensity")
+        col.prop(props, "bloom_clamp")
+
+
 class RENDER_PT_mechazyiu_film(RenderButtonsPanel, Panel):
     bl_label = "Film"
     bl_options = {'DEFAULT_CLOSED'}
@@ -1254,6 +1283,7 @@ classes = (
     RENDER_PT_context,
     RENDER_PT_mechazyiu_sampling,
     RENDER_PT_mechazyiu_ambient_occlusion,
+    RENDER_PT_mechazyiu_bloom,
     RENDER_PT_eevee_sampling,
     RENDER_PT_eevee_sampling_viewport,
     RENDER_PT_eevee_sampling_render,

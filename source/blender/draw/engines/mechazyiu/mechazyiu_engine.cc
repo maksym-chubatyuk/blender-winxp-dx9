@@ -140,7 +140,10 @@ class ShaderCache {
   gpu::StaticShader shadow_mask[3] = {
       {"mechazyiu_shadow_mask_cube"}, {"mechazyiu_shadow_mask_spot"}, {"mechazyiu_shadow_mask_sun"}};
   gpu::StaticShader copy = {"mechazyiu_copy"};
-  gpu::StaticShader output = {"mechazyiu_output"};
+  gpu::StaticShader output[2 /*bloom*/] = {{"mechazyiu_output"}, {"mechazyiu_output_bloom"}};
+  gpu::StaticShader bloom_prefilter = {"mechazyiu_bloom_prefilter"};
+  gpu::StaticShader bloom_downsample = {"mechazyiu_bloom_downsample"};
+  gpu::StaticShader bloom_upsample = {"mechazyiu_bloom_upsample"};
 
   static gpu::StaticShaderCache<ShaderCache> &static_cache()
   {
@@ -360,6 +363,23 @@ class Instance : public DrawEngine {
   /** Ambient occlusion (`Scene.mechazyiu`, a Python property group), distance 0: none. */
   float ao_distance_ = 0.0f;
   float ao_factor_ = 1.0f;
+  BloomSettings bloom_;
+  /** Viewport bloom: its levels (RGBM), the inputs of its passes, the last level's. */
+  Texture bloom_bright_tx_ = {"mechazyiu.bloom_bright"};
+  Texture bloom_down_tx_[bloom_levels_max];
+  Texture bloom_up_tx_[bloom_levels_max];
+  Framebuffer bloom_bright_fb_ = {"mechazyiu.bloom_bright"};
+  Framebuffer bloom_down_fb_[bloom_levels_max];
+  Framebuffer bloom_up_fb_[bloom_levels_max];
+  gpu::Texture *bloom_src_ = nullptr;
+  gpu::Texture *bloom_base_ = nullptr;
+  gpu::Texture *bloom_out_ = nullptr;
+  float4 bloom_texel_ = float4(0.0f);
+  float4 bloom_curve_ = float4(0.0f);
+  float4 bloom_params_ = float4(0.0f);
+  float4 bloom_color_ = float4(0.0f);
+  /** RGBM black (no bloom). */
+  Texture black_tx_ = {"mechazyiu.black"};
   bool use_bounce_ = true;
   float4 mean_uv_transform_ = float4(1.0f, 1.0f, 0.0f, 0.0f);
   /** No occlusion nor bounce light. */
@@ -406,7 +426,10 @@ class Instance : public DrawEngine {
                                            {"mechazyiu.light_area"}};
   PassSimple copy_ps_ = {"mechazyiu.copy"};
   PassSimple mix_ps_ = {"mechazyiu.mix"};
-  PassSimple output_ps_ = {"mechazyiu.output"};
+  PassSimple output_ps_[2 /*bloom*/] = {{"mechazyiu.output"}, {"mechazyiu.output_bloom"}};
+  PassSimple bloom_prefilter_ps_ = {"mechazyiu.bloom_prefilter"};
+  PassSimple bloom_downsample_ps_ = {"mechazyiu.bloom_downsample"};
+  PassSimple bloom_upsample_ps_ = {"mechazyiu.bloom_upsample"};
   /** Shadow casters, perspective and orthographic. */
   PassMain shadow_ps_[2] = {{"mechazyiu.shadow"}, {"mechazyiu.shadow_ortho"}};
   /** Depth of the cutout surfaces, before the G-buffer. */
@@ -592,6 +615,21 @@ class Instance : public DrawEngine {
     ao_distance_ = use_ao ? math::max(value("ambient_occlusion_distance", 0.2f), 0.0f) : 0.0f;
     ao_factor_ = value("ambient_occlusion_factor", 1.0f);
     use_bounce_ = value("use_bounce_light", 1.0f) != 0.0f;
+    bloom_.enabled = value("use_bloom", 0.0f) != 0.0f;
+    bloom_.threshold = value("bloom_threshold", 0.8f);
+    bloom_.knee = value("bloom_knee", 0.5f);
+    bloom_.radius = value("bloom_radius", 6.5f);
+    bloom_.intensity = value("bloom_intensity", 0.05f);
+    bloom_.clamp = value("bloom_clamp", 0.0f);
+    bloom_.color = float3(1.0f);
+    if (const IDProperty *color = group ? IDP_GetPropertyTypeFromGroup(group, "bloom_color", IDP_ARRAY) :
+                                          nullptr)
+    {
+      if (color->subtype == IDP_FLOAT && color->len >= 3) {
+        const float *values = static_cast<const float *>(IDP_array_voidp_get(color));
+        bloom_.color = float3(values[0], values[1], values[2]);
+      }
+    }
   }
 
   /**
@@ -862,13 +900,39 @@ class Instance : public DrawEngine {
     mix_ps_.push_constant("mix_weight", &mix_weight_);
     mix_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 6);
 
-    screen_pass(output_ps_, shaders.output.get());
-    output_ps_.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_DEPTH | DRW_STATE_DEPTH_ALWAYS);
-    output_ps_.bind_texture("source_tx", &mean_tx_);
-    output_ps_.bind_texture("depth_tx", &view_depth_tx_);
-    output_ps_.push_constant("uv_transform", &uv_transform_);
-    output_ps_.push_constant("depth_proj", &depth_proj_);
-    output_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 6);
+    const GPUSamplerState bloom_sampler = {GPU_SAMPLER_FILTERING_LINEAR,
+                                           GPU_SAMPLER_EXTEND_MODE_EXTEND,
+                                           GPU_SAMPLER_EXTEND_MODE_EXTEND};
+    screen_pass(bloom_prefilter_ps_, shaders.bloom_prefilter.get());
+    bloom_prefilter_ps_.bind_texture("source_tx", &bloom_src_, bloom_sampler);
+    bloom_prefilter_ps_.push_constant("bloom_texel", &bloom_texel_);
+    bloom_prefilter_ps_.push_constant("bloom_curve", &bloom_curve_);
+    bloom_prefilter_ps_.push_constant("bloom_params", &bloom_params_);
+    bloom_prefilter_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 6);
+    screen_pass(bloom_downsample_ps_, shaders.bloom_downsample.get());
+    bloom_downsample_ps_.bind_texture("source_tx", &bloom_src_, bloom_sampler);
+    bloom_downsample_ps_.push_constant("bloom_texel", &bloom_texel_);
+    bloom_downsample_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 6);
+    screen_pass(bloom_upsample_ps_, shaders.bloom_upsample.get());
+    bloom_upsample_ps_.bind_texture("source_tx", &bloom_src_, bloom_sampler);
+    bloom_upsample_ps_.bind_texture("base_tx", &bloom_base_, bloom_sampler);
+    bloom_upsample_ps_.push_constant("bloom_texel", &bloom_texel_);
+    bloom_upsample_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 6);
+
+    for (int bloom = 0; bloom < 2; bloom++) {
+      PassSimple &ps = output_ps_[bloom];
+      screen_pass(ps, shaders.output[bloom].get());
+      ps.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_DEPTH | DRW_STATE_DEPTH_ALWAYS);
+      ps.bind_texture("source_tx", &mean_tx_);
+      ps.bind_texture("depth_tx", &view_depth_tx_);
+      ps.push_constant("uv_transform", &uv_transform_);
+      ps.push_constant("depth_proj", &depth_proj_);
+      if (bloom) {
+        ps.bind_texture("bloom_tx", &bloom_out_, bloom_sampler);
+        ps.push_constant("bloom_color", &bloom_color_);
+      }
+      ps.draw_procedural(GPU_PRIM_TRIS, 1, 6);
+    }
   }
 
   /** Index of the material in the table, its data is read on first use. */
@@ -1183,6 +1247,11 @@ class Instance : public DrawEngine {
                           int2(1),
                           GPU_TEXTURE_USAGE_SHADER_READ,
                           white);
+    }
+    if (black_tx_.gpu_texture() == nullptr) {
+      const float4 black(0.0f);
+      black_tx_.ensure_2d(
+          gpu::TextureFormat::UNORM_8_8_8_8, int2(1), GPU_TEXTURE_USAGE_SHADER_READ, black);
     }
     if (no_ao_tx_.gpu_texture() == nullptr) {
       const float4 none(0.0f, 0.0f, 0.0f, 1.0f);
@@ -1949,6 +2018,63 @@ class Instance : public DrawEngine {
   /* ------------------------------------------------------------------ */
   /* Viewport. */
 
+  /**
+   * The bloom of the viewport's mean (EEVEE Legacy's): the bright parts at half the resolution,
+   * halved again and again, added back up. The output adds the last level (`bloom_out_`).
+   */
+  void bloom_render(Manager &manager, int2 size)
+  {
+    bloom_out_ = nullptr;
+    if (!bloom_.enabled || bloom_.intensity <= 0.0f || size.x < 4 || size.y < 4) {
+      return;
+    }
+    const BloomLevels levels = bloom_levels_get(size, bloom_.radius);
+    const eGPUTextureUsage usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_ATTACHMENT;
+    rect_ = float4(-1.0f, -1.0f, 1.0f, 1.0f);
+    proj_type_ = float4(0.0f, 0.0f, 1.0f, 1.0f);
+    auto pass = [&](Texture &target, Framebuffer &fb, int2 target_size, PassSimple &ps) {
+      target.ensure_2d(gpu::TextureFormat::UNORM_8_8_8_8, target_size, usage);
+      fb.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(target));
+      GPU_framebuffer_bind(fb);
+      GPU_framebuffer_viewport_set(fb, 0, 0, target_size.x, target_size.y);
+      manager.submit(ps);
+    };
+    auto texel = [&](int2 source_size) {
+      return float4(1.0f / float2(source_size), levels.sample_scale, 0.0f);
+    };
+
+    int2 level_size = math::max(size / 2, int2(1));
+    bloom_curve_ = bloom_.curve();
+    bloom_params_ = float4(bloom_.clamp, 0.0f, 0.0f, 0.0f);
+    bloom_src_ = mean_tx_;
+    bloom_texel_ = texel(size);
+    pass(bloom_bright_tx_, bloom_bright_fb_, level_size, bloom_prefilter_ps_);
+
+    int2 sizes[bloom_levels_max];
+    bloom_src_ = bloom_bright_tx_;
+    for (int i = 0; i < levels.len; i++) {
+      bloom_texel_ = texel(level_size);
+      level_size = math::max(level_size / 2, int2(1));
+      sizes[i] = level_size;
+      pass(bloom_down_tx_[i], bloom_down_fb_[i], level_size, bloom_downsample_ps_);
+      bloom_src_ = bloom_down_tx_[i];
+    }
+    int2 last_size = sizes[levels.len - 1];
+    for (int i = levels.len - 2; i >= 0; i--) {
+      bloom_base_ = bloom_down_tx_[i];
+      bloom_texel_ = texel(last_size);
+      pass(bloom_up_tx_[i], bloom_up_fb_[i], sizes[i], bloom_upsample_ps_);
+      bloom_src_ = bloom_up_tx_[i];
+      last_size = sizes[i];
+    }
+    /* Once more, to half the resolution (the output samples it once). */
+    bloom_base_ = black_tx_;
+    bloom_texel_ = texel(last_size);
+    pass(bloom_bright_tx_, bloom_bright_fb_, math::max(size / 2, int2(1)), bloom_upsample_ps_);
+    bloom_out_ = bloom_bright_tx_;
+    bloom_color_ = float4(bloom_.color * bloom_.intensity, 0.0f);
+  }
+
   void draw(Manager &manager) final
   {
     DefaultTextureList *dtxl = draw_ctx->viewport_texture_list_get();
@@ -2039,6 +2165,8 @@ class Instance : public DrawEngine {
       sample_++;
     }
 
+    bloom_render(manager, size);
+
     /* Output: the mean, and the depth of the (not jittered) view for the overlays. */
     output_fb_.ensure(GPU_ATTACHMENT_TEXTURE(dtxl->depth), GPU_ATTACHMENT_TEXTURE(dtxl->color));
     GPU_framebuffer_bind(output_fb_);
@@ -2047,7 +2175,7 @@ class Instance : public DrawEngine {
     uv_transform_ = float4(1.0f, 1.0f, 0.0f, 0.0f);
     const bool is_persp = winmat[3][3] == 0.0f;
     depth_proj_ = float4(winmat[2][2], winmat[3][2], is_persp ? 1.0f : 0.0f, 0.0f);
-    manager.submit(output_ps_);
+    manager.submit(output_ps_[bloom_out_ != nullptr]);
     DRW_submission_end();
 
     if (samples_len <= 0 || sample_ < samples_len) {
@@ -2113,6 +2241,14 @@ class Instance : public DrawEngine {
       if (depth) {
         tile_read(gb_depth_tx_, tile, 1, depth->ibuf->float_data_for_write(), size, true);
       }
+    }
+    if (combined && bloom_.enabled && bloom_.intensity > 0.0f) {
+      RE_engine_update_stats(engine, nullptr, "Bloom");
+      bloom_apply(MutableSpan<float4>(
+                      reinterpret_cast<float4 *>(combined->ibuf->float_data_for_write()),
+                      int64_t(size.x) * size.y),
+                  size,
+                  bloom_);
     }
   }
 

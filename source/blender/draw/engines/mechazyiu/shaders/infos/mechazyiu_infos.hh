@@ -477,3 +477,42 @@ DEPTH_WRITE(DepthWrite::ANY)
 ADDITIONAL_INFO(mechazyiu_screen_common)
 DO_STATIC_COMPILATION()
 GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_output_bloom)
+/* The bloom at half the resolution (RGBM, see `mechazyiu_bloom.hlsl`). */
+SAMPLER(2, sampler2D, bloom_tx)
+/* rgb: color times intensity of the bloom. */
+PUSH_CONSTANT(float4, bloom_color)
+ADDITIONAL_INFO(mechazyiu_output)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+/* Bloom of the viewport (see `mechazyiu_bloom.hlsl`). */
+GPU_SHADER_CREATE_INFO(mechazyiu_bloom_common)
+SAMPLER(0, sampler2D, source_tx)
+/* xy: texel size of `source_tx`, z: distance of the tent filter's samples (texels). */
+PUSH_CONSTANT(float4, bloom_texel)
+ADDITIONAL_INFO(mechazyiu_screen_common)
+GPU_SHADER_CREATE_END()
+
+/* The bright parts of the mean at half the resolution. */
+GPU_SHADER_CREATE_INFO(mechazyiu_bloom_prefilter)
+/* Threshold - knee, knee * 2, 0.25 / knee, threshold. */
+PUSH_CONSTANT(float4, bloom_curve)
+/* x: clamp (0: none). */
+PUSH_CONSTANT(float4, bloom_params)
+ADDITIONAL_INFO(mechazyiu_bloom_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_bloom_downsample)
+ADDITIONAL_INFO(mechazyiu_bloom_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+/* `base_tx` plus the tent filtered lower level (`source_tx`). */
+GPU_SHADER_CREATE_INFO(mechazyiu_bloom_upsample)
+SAMPLER(1, sampler2D, base_tx)
+ADDITIONAL_INFO(mechazyiu_bloom_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
