@@ -244,6 +244,39 @@ static float blackman_harris(float x)
 }
 
 /**
+ * Offset in [-0.5, 0.5] distributed like the Blackman-Harris window, for a uniform `u`: samples
+ * are placed by the pixel filter and all weigh the same. (Weighting samples instead lets a few
+ * of them dominate the mean, and the noise of the others never averages out.)
+ */
+static float blackman_harris_sample(float u)
+{
+  constexpr int table_len = 256;
+  static const Array<float> inverse_cdf = []() {
+    constexpr int steps = 4096;
+    Array<float> cdf(steps + 1);
+    cdf[0] = 0.0f;
+    for (int i = 0; i < steps; i++) {
+      cdf[i + 1] = cdf[i] + blackman_harris((float(i) + 0.5f) / steps - 0.5f);
+    }
+    Array<float> table(table_len + 1);
+    int i = 0;
+    for (int j = 0; j <= table_len; j++) {
+      const float target = cdf[steps] * float(j) / table_len;
+      while (i < steps && cdf[i + 1] < target) {
+        i++;
+      }
+      const float range = cdf[i + 1] - cdf[i];
+      const float f = range > 0.0f ? (target - cdf[i]) / range : 0.0f;
+      table[j] = (float(i) + math::clamp(f, 0.0f, 1.0f)) / steps - 0.5f;
+    }
+    return table;
+  }();
+  const float x = math::clamp(u, 0.0f, 1.0f) * table_len;
+  const int i = math::min(int(x), table_len - 1);
+  return math::interpolate(inverse_cdf[i], inverse_cdf[i + 1], x - float(i));
+}
+
+/**
  * A surface with a blended material: drawn after the lights, back to front, over the sample.
  * One pass per side (back faces first) for the world light and emission, and one for the lights.
  */
@@ -1465,16 +1498,16 @@ class Instance : public DrawEngine {
     return true;
   }
 
-  /** Weight of a sample's pixel offset, and the offset. */
+  /** Pixel offset of a sample, all samples weigh the same (`r_weight`, 1). */
   float2 sample_offset(int sample, float &r_weight) const
   {
+    r_weight = 1.0f;
     if (sample == 0) {
-      r_weight = 1.0f;
       return float2(0.0f);
     }
-    const float2 u(halton(sample, 2), halton(sample, 3));
-    r_weight = blackman_harris(u.x - 0.5f) * blackman_harris(u.y - 0.5f);
-    return (u - 0.5f) * math::max(filter_size_, 0.01f);
+    const float2 offset(blackman_harris_sample(halton(sample, 2)),
+                        blackman_harris_sample(halton(sample, 3)));
+    return offset * math::max(filter_size_, 0.01f);
   }
 
   /* ------------------------------------------------------------------ */
