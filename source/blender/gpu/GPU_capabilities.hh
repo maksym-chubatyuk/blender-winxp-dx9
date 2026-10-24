@@ -18,6 +18,7 @@ namespace blender {
 
 namespace gpu {
 class Texture;
+enum class TextureFormat : uint8_t;
 }
 
 int GPU_max_texture_size();
@@ -91,6 +92,10 @@ double GPU_texture_write_rate(gpu::Texture *texture);
 /** Move textures that can be restored out of video memory, so render targets created next get
  * it first. */
 void GPU_memory_evict_managed();
+/** The format can be rendered to (always true except on Direct3D 9). */
+bool GPU_render_target_format_support(gpu::TextureFormat format);
+/** Color attachments a draw can write at once. */
+int GPU_max_color_targets();
 
 /**
  * Return support for the active context + window.

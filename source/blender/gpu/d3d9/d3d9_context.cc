@@ -343,7 +343,9 @@ static int64_t d3d9_local_video_memory()
     caps.dwCaps = DDSCAPS_VIDEOMEMORY | DDSCAPS_LOCALVIDMEM;
     DWORD total = 0, free_bytes = 0;
     if (SUCCEEDED(dd->GetAvailableVidMem(&caps, &total, &free_bytes))) {
-      bytes = int64_t(total);
+      /* The 32 bit count can't hold the memory of large cards (it can be clamped or wrapped):
+       * anything implausibly small counts as large. */
+      bytes = total < (DWORD(16) << 20) ? int64_t(4096) << 20 : int64_t(total);
     }
     dd->Release();
   }
@@ -366,7 +368,9 @@ int64_t D3D9Context::render_target_budget()
     display = int64_t(mode.Width) * mode.Height * 4;
   }
   const int64_t reserve = int64_t(8) << 20;
-  return local - 2 * display - d3d9_render_target_bytes() - reserve;
+  /* Large cards: a 32 bit process can't map more anyway. */
+  const int64_t usable = std::min<int64_t>(local, int64_t(512) << 20);
+  return usable - 2 * display - d3d9_render_target_bytes() - reserve;
 }
 
 double D3D9Context::texture_write_rate(Texture *texture)
@@ -434,6 +438,52 @@ void D3D9Context::memory_evict_managed()
 {
   end_scene();
   device->EvictManagedResources();
+}
+
+/**
+ * Emulation of older hardware, to test the fallbacks: `BLENDER_D3D9_MAX_RTS=<n>` (fewer render
+ * targets per draw), `BLENDER_D3D9_NO_10BIT=1` (no 10 bit render targets),
+ * `BLENDER_D3D9_NO_FLOAT_RT=1` (no floating point render targets).
+ */
+static bool d3d9_emulate(const char *name)
+{
+  const char *value = getenv(name);
+  return value && value[0] && value[0] != '0';
+}
+
+bool D3D9Context::render_target_format_support(TextureFormat format)
+{
+  const D3D9TextureFormat device_format = d3d9_texture_format(format);
+  switch (device_format.format) {
+    case D3DFMT_A2B10G10R10:
+      if (d3d9_emulate("BLENDER_D3D9_NO_10BIT")) {
+        return false;
+      }
+      break;
+    case D3DFMT_R16F:
+    case D3DFMT_G16R16F:
+    case D3DFMT_A16B16G16R16F:
+    case D3DFMT_R32F:
+    case D3DFMT_G32R32F:
+    case D3DFMT_A32B32G32R32F:
+      if (d3d9_emulate("BLENDER_D3D9_NO_FLOAT_RT")) {
+        return false;
+      }
+      break;
+    default:
+      break;
+  }
+  return D3D9Backend::get()->format_supported(
+      device_format.format, D3DUSAGE_RENDERTARGET, D3DRTYPE_TEXTURE);
+}
+
+int D3D9Context::max_color_targets()
+{
+  int len = clamp_i(int(D3D9Backend::get()->caps.NumSimultaneousRTs), 1, 4);
+  if (const char *emulate = getenv("BLENDER_D3D9_MAX_RTS")) {
+    len = clamp_i(atoi(emulate), 1, len);
+  }
+  return len;
 }
 
 /** \} */

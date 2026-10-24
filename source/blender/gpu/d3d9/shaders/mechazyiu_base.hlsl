@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
 /**
- * First pass of an MECHAZYIU sample (`mechazyiu_base`): world lighting, emission and the background,
- * mixed into the running mean of the previous samples.
+ * First pass of a MECHAZYIU sample (`mechazyiu_base`): world lighting, emission and the
+ * background.
  */
 
 #include "d3d9_common.hlsl"
@@ -15,12 +15,10 @@ sampler2D gb_diffuse_tx : register(s0);
 sampler2D gb_normal_tx : register(s1);
 sampler2D gb_depth_tx : register(s2);
 sampler2D gb_specular_tx : register(s3);
-sampler2D accum_tx : register(s4);
 sampler2D material_tx : register(s5);
 
 float4 world_sh[4];
 float4 background;
-float4 accum_uv;
 
 float3 world_light(float3 n)
 {
@@ -35,7 +33,6 @@ float4 frag(VertOut v) : COLOR0
   float3 n = mechazyiu_normal_decode(tex2D(gb_normal_tx, v.uv).xyz);
   float depth = tex2D(gb_depth_tx, v.uv).x;
   float4 gs = tex2D(gb_specular_tx, v.uv);
-  float4 prev = tex2D(accum_tx, v.uv * accum_uv.xy + accum_uv.zw);
   float3 emission = tex2D(material_tx, float2(gs.a * (255.0 / 256.0) + 0.5 / 256.0, 0.5)).rgb;
 
   float3 V = -normalize(v.ray_dir);
@@ -51,6 +48,5 @@ float4 frag(VertOut v) : COLOR0
   float3 spec = f0 * ab.x + saturate(50.0 * f0.g) * ab.y;
 
   float3 color = gd.rgb * gd.rgb * world_light(n) + spec * world_light(R) + emission;
-  float4 result = depth > 0.0 ? float4(color, 1.0) : float4(background.rgb, 1.0 - world_sh[0].a);
-  return lerp(prev, result, background.a);
+  return depth > 0.0 ? float4(color, 1.0) : float4(background.rgb, 1.0 - world_sh[0].a);
 }

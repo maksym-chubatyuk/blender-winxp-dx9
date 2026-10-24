@@ -4,7 +4,9 @@
 
 /**
  * One light of an MECHAZYIU sample (`mechazyiu_light_*`), added to the running mean over the rectangle
- * the light reaches. Defines: SUN, SPOT, AREA (point light without any).
+ * the light reaches. Defines: SUN, SPOT, AREA (point light without any). BLEND: the contribution is
+ * added by blending (hardware blending into floating point targets), instead of being added to
+ * the sample read from `accum_tx`.
  *
  * Lambert diffuse and GGX specular (Kelemen visibility, Schlick Fresnel): the cheaper terms keep
  * it below the ps_2_0 instruction limit.
@@ -20,7 +22,9 @@ sampler2D gb_diffuse_tx : register(s0);
 sampler2D gb_normal_tx : register(s1);
 sampler2D gb_depth_tx : register(s2);
 sampler2D gb_specular_tx : register(s3);
+#ifndef BLEND
 sampler2D accum_tx : register(s4);
+#endif
 /* Shadow of the light (`mechazyiu_shadow_mask.hlsl`), or a white texture. */
 sampler2D shadow_mask_tx : register(s5);
 
@@ -35,7 +39,11 @@ float4 frag(VertOut v) : COLOR0
   float3 n = mechazyiu_normal_decode(tex2D(gb_normal_tx, v.uv).xyz);
   float depth = tex2D(gb_depth_tx, v.uv).x;
   float4 gs = tex2D(gb_specular_tx, v.uv);
+#ifdef BLEND
+  float4 accum = 0.0;
+#else
   float4 accum = tex2D(accum_tx, v.uv);
+#endif
   float shadow = tex2D(shadow_mask_tx, v.uv).x;
 
 #ifdef SUN

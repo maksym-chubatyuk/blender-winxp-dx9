@@ -240,6 +240,16 @@ void GPU_memory_evict_managed()
   Context::get()->memory_evict_managed();
 }
 
+bool GPU_render_target_format_support(gpu::TextureFormat format)
+{
+  return Context::get()->render_target_format_support(format);
+}
+
+int GPU_max_color_targets()
+{
+  return Context::get()->max_color_targets();
+}
+
 bool GPU_stereo_quadbuffer_support()
 {
   return Context::get()->front_right != nullptr;

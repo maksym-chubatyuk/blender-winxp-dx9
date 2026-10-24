@@ -34,6 +34,7 @@
 #include "BLT_translation.hh"
 
 #include "BKE_attribute.hh"
+#include "BKE_report.hh"
 #include "BKE_editmesh.hh"
 #include "BKE_material.hh"
 #include "BKE_mesh.hh"
@@ -82,9 +83,9 @@ using namespace draw;
 /** Materials of a view (the index is in the G-buffer, 8 bits). */
 constexpr int material_table_len = 256;
 
-/** Video memory per pixel of a tile: 4 G-buffer targets, depth, 2 half float accumulations, the
- * shadow mask. */
-constexpr int64_t tile_bytes_per_pixel = 4 * 4 + 4 + 2 * 8 + 4;
+/** Video memory per pixel of a tile: 4 G-buffer targets, depth, the sample and its copy (half
+ * floats), the shadow mask, the mean of the samples (final renders). */
+constexpr int64_t tile_bytes_per_pixel = 4 * 4 + 4 + 2 * 8 + 4 + 8;
 /** Shadow map atlas: 4 x 2 cells of 512 (the faces of point and area lights), or the left half
  * (spots and suns). Single precision distances and their depth buffer. */
 constexpr int shadow_atlas_width = 2048;
@@ -93,8 +94,6 @@ constexpr int shadow_cube_size = 512;
 constexpr int64_t shadow_atlas_bytes = int64_t(shadow_atlas_width) * shadow_atlas_height * 8;
 /** Running mean (half float) and linear depth of the whole viewport. */
 constexpr int64_t view_bytes_per_pixel = 8 + 4;
-/** Render targets are at most 2048 pixels wide on R300 hardware. */
-constexpr int max_tile_size = 2048;
 
 /* -------------------------------------------------------------------- */
 /** \name Shaders
@@ -102,12 +101,22 @@ constexpr int max_tile_size = 2048;
 
 class ShaderCache {
  public:
-  gpu::StaticShader gbuffer[2 /*texture*/][2 /*flip*/] = {
-      {{"mechazyiu_gbuffer"}, {"mechazyiu_gbuffer_flip"}},
-      {{"mechazyiu_gbuffer_texture"}, {"mechazyiu_gbuffer_texture_flip"}}};
+  gpu::StaticShader gbuffer[2 /*texture*/][2 /*flip*/][2 /*single target*/] = {
+      {{{"mechazyiu_gbuffer"}, {"mechazyiu_gbuffer_single"}},
+       {{"mechazyiu_gbuffer_flip"}, {"mechazyiu_gbuffer_flip_single"}}},
+      {{{"mechazyiu_gbuffer_texture"}, {"mechazyiu_gbuffer_texture_single"}},
+       {{"mechazyiu_gbuffer_texture_flip"}, {"mechazyiu_gbuffer_texture_flip_single"}}}};
   gpu::StaticShader base = {"mechazyiu_base"};
-  gpu::StaticShader light[light_type_len] = {
-      {"mechazyiu_light_point"}, {"mechazyiu_light_spot"}, {"mechazyiu_light_sun"}, {"mechazyiu_light_area"}};
+  gpu::StaticShader light[2 /*blend*/][light_type_len] = {
+      {{"mechazyiu_light_point"},
+       {"mechazyiu_light_spot"},
+       {"mechazyiu_light_sun"},
+       {"mechazyiu_light_area"}},
+      {{"mechazyiu_light_point_blend"},
+       {"mechazyiu_light_spot_blend"},
+       {"mechazyiu_light_sun_blend"},
+       {"mechazyiu_light_area_blend"}}};
+  gpu::StaticShader mix = {"mechazyiu_mix"};
   gpu::StaticShader shadow[2 /*ortho*/] = {{"mechazyiu_shadow"}, {"mechazyiu_shadow_ortho"}};
   gpu::StaticShader shadow_mask[3] = {
       {"mechazyiu_shadow_mask_cube"}, {"mechazyiu_shadow_mask_spot"}, {"mechazyiu_shadow_mask_sun"}};
@@ -155,8 +164,11 @@ struct TilePlan {
   }
 };
 
-/** Fewest tiles of at most `max_pixels` pixels covering the image, as square as possible. */
-static TilePlan tile_plan_get(int2 size, int64_t max_pixels)
+/**
+ * Fewest tiles of at most `max_pixels` pixels and `max_tile_size` wide covering the image, as
+ * square as possible.
+ */
+static TilePlan tile_plan_get(int2 size, int64_t max_pixels, int max_tile_size)
 {
   TilePlan plan;
   plan.size = size;
@@ -221,11 +233,44 @@ static float blackman_harris(float x)
                        0.01168f * math::cos(3.0f * t));
 }
 
+/** What the GPU can do, chosen paths. */
+struct Capabilities {
+  /** Floating point render targets (16 and 32 bit): required. */
+  bool supported = true;
+  /** 4 render targets per draw, else the G-buffer is drawn once per target. */
+  bool multiple_targets = true;
+  /** Blending into floating point targets: lights are added by blending, else each light pass
+   * reads the sample, writes the other buffer, and the rectangle is copied back. */
+  bool float_blending = false;
+  /** Normals in 10 bits per component when the hardware renders to it, else 8. */
+  gpu::TextureFormat normal_format = gpu::TextureFormat::UNORM_10_10_10_2;
+  int max_tile_size = 2048;
+
+  static Capabilities get()
+  {
+    Capabilities caps;
+    caps.supported = GPU_render_target_format_support(gpu::TextureFormat::SFLOAT_16_16_16_16) &&
+                     GPU_render_target_format_support(gpu::TextureFormat::SFLOAT_32);
+    caps.multiple_targets = GPU_max_color_targets() >= 4;
+    caps.float_blending = GPU_float_blending_support();
+    caps.normal_format = GPU_render_target_format_support(gpu::TextureFormat::UNORM_10_10_10_2) ?
+                             gpu::TextureFormat::UNORM_10_10_10_2 :
+                             gpu::TextureFormat::UNORM_8_8_8_8;
+    caps.max_tile_size = GPU_max_texture_size();
+    return caps;
+  }
+};
+
+static const char *unsupported_message =
+    "MECHAZYIU needs a GPU with floating point render targets (Radeon 9500, GeForce 6, Intel "
+    "GMA X3000 or newer)";
+
 class Instance : public DrawEngine {
  public:
   const DRWContext *draw_ctx = nullptr;
 
  private:
+  Capabilities caps_ = Capabilities::get();
   View view_ = {"mechazyiu_view"};
 
   /* Scene. */
@@ -250,15 +295,19 @@ class Instance : public DrawEngine {
   /* Passes. */
   PassMain gbuffer_ps_ = {"mechazyiu.gbuffer"};
   PassSimple base_ps_ = {"mechazyiu.base"};
-  PassSimple light_ps_[light_type_len] = {
-      {"mechazyiu.light_point"}, {"mechazyiu.light_spot"}, {"mechazyiu.light_sun"}, {"mechazyiu.light_area"}};
+  PassSimple light_ps_[light_type_len] = {{"mechazyiu.light_point"},
+                                           {"mechazyiu.light_spot"},
+                                           {"mechazyiu.light_sun"},
+                                           {"mechazyiu.light_area"}};
   PassSimple copy_ps_ = {"mechazyiu.copy"};
+  PassSimple mix_ps_ = {"mechazyiu.mix"};
   PassSimple output_ps_ = {"mechazyiu.output"};
   /** Shadow casters, perspective and orthographic. */
   PassMain shadow_ps_[2] = {{"mechazyiu.shadow"}, {"mechazyiu.shadow_ortho"}};
   /** Shadow masks of cube, spot and sun shadow maps. */
-  PassSimple shadow_mask_ps_[3] = {
-      {"mechazyiu.shadow_mask_cube"}, {"mechazyiu.shadow_mask_spot"}, {"mechazyiu.shadow_mask_sun"}};
+  PassSimple shadow_mask_ps_[3] = {{"mechazyiu.shadow_mask_cube"},
+                                    {"mechazyiu.shadow_mask_spot"},
+                                    {"mechazyiu.shadow_mask_sun"}};
   View shadow_view_ = {"mechazyiu_shadow_view"};
   /** World space bounds of the shadow casters (sun shadow maps cover them). */
   float3 casters_min_ = float3(FLT_MAX);
@@ -272,6 +321,14 @@ class Instance : public DrawEngine {
   Texture depth_tx_ = {"mechazyiu.depth"};
   Texture accum_tx_[2] = {{"mechazyiu.accum0"}, {"mechazyiu.accum1"}};
   Framebuffer gbuffer_fb_ = {"mechazyiu.gbuffer"};
+  /** One target per draw (no multiple render targets). */
+  Framebuffer gbuffer_single_fb_[4] = {{"mechazyiu.gbuffer0"},
+                                       {"mechazyiu.gbuffer1"},
+                                       {"mechazyiu.gbuffer2"},
+                                       {"mechazyiu.gbuffer3"}};
+  /** Final renders: the mean of the tile's samples. */
+  Texture tile_mean_tx_ = {"mechazyiu.tile_mean"};
+  Framebuffer tile_mean_fb_ = {"mechazyiu.tile_mean"};
   Framebuffer accum_fb_[2] = {{"mechazyiu.accum0"}, {"mechazyiu.accum1"}};
   Texture shadow_mask_tx_ = {"mechazyiu.shadow_mask"};
   Framebuffer shadow_mask_fb_ = {"mechazyiu.shadow_mask"};
@@ -285,7 +342,7 @@ class Instance : public DrawEngine {
   TilePlan plan_;
   int2 tile_allocated_ = int2(0);
   int64_t budget_ = 0;
-  /** Accumulation buffer holding the mean. */
+  /** Accumulation buffer holding the sample. */
   int cur_ = 0;
 
   /* Viewport: mean and linear depth of the whole view. */
@@ -303,7 +360,9 @@ class Instance : public DrawEngine {
   float4 proj_type_ = float4(0.0f);
   float4 world_sh_[4] = {};
   float4 background_ = float4(0.0f);
-  float4 accum_uv_ = float4(1.0f, 1.0f, 0.0f, 0.0f);
+  float4 gbuffer_target_ = float4(1.0f, 0.0f, 0.0f, 0.0f);
+  float4 mix_weight_ = float4(1.0f);
+  gpu::Texture *mean_src_ = nullptr;
   float4 light_position_ = float4(0.0f);
   float4 light_direction_ = float4(0.0f);
   float4 light_color_ = float4(0.0f);
@@ -383,7 +442,6 @@ class Instance : public DrawEngine {
       ps.bind_texture("gb_normal_tx", &gb_normal_tx_);
       ps.bind_texture("gb_depth_tx", &gb_depth_tx_);
       ps.bind_texture("gb_specular_tx", &gb_specular_tx_);
-      ps.bind_texture("accum_tx", &accum_src_);
     };
 
     screen_pass(base_ps_, shaders.base.get());
@@ -391,12 +449,17 @@ class Instance : public DrawEngine {
     base_ps_.bind_texture("material_tx", &material_tx_);
     base_ps_.push_constant("world_sh", world_sh_, 4);
     base_ps_.push_constant("background", &background_);
-    base_ps_.push_constant("accum_uv", &accum_uv_);
     base_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 6);
 
     for (int type = 0; type < light_type_len; type++) {
       PassSimple &ps = light_ps_[type];
-      screen_pass(ps, shaders.light[type].get());
+      screen_pass(ps, shaders.light[caps_.float_blending][type].get());
+      if (caps_.float_blending) {
+        ps.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_BLEND_ADD_FULL);
+      }
+      else {
+        ps.bind_texture("accum_tx", &accum_src_);
+      }
       gbuffer_read(ps);
       ps.push_constant("light_position", &light_position_);
       ps.push_constant("light_direction", &light_direction_);
@@ -433,6 +496,13 @@ class Instance : public DrawEngine {
     copy_ps_.push_constant("uv_transform", &uv_transform_);
     copy_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 6);
 
+    screen_pass(mix_ps_, shaders.mix.get());
+    mix_ps_.bind_texture("source_tx", &copy_src_);
+    mix_ps_.bind_texture("mean_tx", &mean_src_);
+    mix_ps_.push_constant("uv_transform", &uv_transform_);
+    mix_ps_.push_constant("mix_weight", &mix_weight_);
+    mix_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 6);
+
     screen_pass(output_ps_, shaders.output.get());
     output_ps_.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_DEPTH | DRW_STATE_DEPTH_ALWAYS);
     output_ps_.bind_texture("source_tx", &mean_tx_);
@@ -463,7 +533,11 @@ class Instance : public DrawEngine {
       PassMain::Sub &sub = gbuffer_ps_.sub("mechazyiu.material");
       sub.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_DEPTH | DRW_STATE_DEPTH_LESS_EQUAL |
                     (back ? DRW_STATE_CULL_FRONT : DRW_STATE_CULL_BACK));
-      sub.shader_set(ShaderCache::get().gbuffer[textured][back].get());
+      const bool single = !caps_.multiple_targets;
+      sub.shader_set(ShaderCache::get().gbuffer[textured][back][single].get());
+      if (single) {
+        sub.push_constant("gbuffer_target", &gbuffer_target_);
+      }
       sub.push_constant("mat_base", float4(data.base_color, data.alpha));
       const float table_index = float(math::min(index, material_table_len - 1)) / 255.0f;
       sub.push_constant(
@@ -617,7 +691,7 @@ class Instance : public DrawEngine {
     {
       return;
     }
-    TilePlan plan = tile_plan_get(size, available / tile_bytes_per_pixel);
+    TilePlan plan = tile_plan_get(size, available / tile_bytes_per_pixel, caps_.max_tile_size);
     for (int attempt = 0; attempt < 4; attempt++) {
       if (plan.tile != tile_allocated_ || attempt == 0) {
         tile_buffers_free();
@@ -630,7 +704,7 @@ class Instance : public DrawEngine {
         break;
       }
       available = available * 3 / 5;
-      plan = tile_plan_get(size, available / tile_bytes_per_pixel);
+      plan = tile_plan_get(size, available / tile_bytes_per_pixel, caps_.max_tile_size);
     }
     plan_ = plan;
     budget_ = available;
@@ -649,7 +723,7 @@ class Instance : public DrawEngine {
   {
     const eGPUTextureUsage usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_ATTACHMENT;
     gb_diffuse_tx_.ensure_2d(gpu::TextureFormat::UNORM_8_8_8_8, size, usage);
-    gb_normal_tx_.ensure_2d(gpu::TextureFormat::UNORM_10_10_10_2, size, usage);
+    gb_normal_tx_.ensure_2d(caps_.normal_format, size, usage);
     gb_depth_tx_.ensure_2d(gpu::TextureFormat::SFLOAT_32, size, usage);
     gb_specular_tx_.ensure_2d(gpu::TextureFormat::UNORM_8_8_8_8, size, usage);
     shadow_mask_tx_.ensure_2d(gpu::TextureFormat::UNORM_8_8_8_8, size, usage);
@@ -663,11 +737,22 @@ class Instance : public DrawEngine {
       accum_tx_[i].ensure_2d(gpu::TextureFormat::SFLOAT_16_16_16_16, size, usage);
       accum_fb_[i].ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(accum_tx_[i]));
     }
-    gbuffer_fb_.ensure(GPU_ATTACHMENT_TEXTURE(depth_tx_),
-                       GPU_ATTACHMENT_TEXTURE(gb_diffuse_tx_),
-                       GPU_ATTACHMENT_TEXTURE(gb_normal_tx_),
-                       GPU_ATTACHMENT_TEXTURE(gb_depth_tx_),
-                       GPU_ATTACHMENT_TEXTURE(gb_specular_tx_));
+    tile_mean_tx_.ensure_2d(gpu::TextureFormat::SFLOAT_16_16_16_16, size, usage);
+    tile_mean_fb_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(tile_mean_tx_));
+    if (caps_.multiple_targets) {
+      gbuffer_fb_.ensure(GPU_ATTACHMENT_TEXTURE(depth_tx_),
+                         GPU_ATTACHMENT_TEXTURE(gb_diffuse_tx_),
+                         GPU_ATTACHMENT_TEXTURE(gb_normal_tx_),
+                         GPU_ATTACHMENT_TEXTURE(gb_depth_tx_),
+                         GPU_ATTACHMENT_TEXTURE(gb_specular_tx_));
+    }
+    else {
+      gpu::Texture *targets[4] = {gb_diffuse_tx_, gb_normal_tx_, gb_depth_tx_, gb_specular_tx_};
+      for (int i = 0; i < 4; i++) {
+        gbuffer_single_fb_[i].ensure(GPU_ATTACHMENT_TEXTURE(depth_tx_),
+                                     GPU_ATTACHMENT_TEXTURE(targets[i]));
+      }
+    }
     tile_allocated_ = size;
   }
 
@@ -681,6 +766,7 @@ class Instance : public DrawEngine {
     depth_tx_.free();
     accum_tx_[0].free();
     accum_tx_[1].free();
+    tile_mean_tx_.free();
     tile_allocated_ = int2(0);
   }
 
@@ -694,8 +780,9 @@ class Instance : public DrawEngine {
                                 accum_tx_[0],
                                 accum_tx_[1],
                                 shadow_mask_tx_,
-                                shadow_tx_};
-    constexpr int textures_len = 8;
+                                shadow_tx_,
+                                tile_mean_tx_};
+    constexpr int textures_len = 9;
     double rates[textures_len];
     double best = 0.0;
     for (int i = 0; i < textures_len; i++) {
@@ -705,10 +792,11 @@ class Instance : public DrawEngine {
     if (best <= 0.0) {
       return true;
     }
-    /* Video memory writes at 4 GB/s and more on the Radeon 9600, AGP memory at about 1. */
-    const double reference = math::max(best, 3.0e9);
+    /* Much slower than the others (integrated GPUs only have system memory), and slow (fast
+     * clears make some formats look many times faster on recent GPUs): on the Radeon 9600 video
+     * memory writes at 4 GB/s and more, AGP memory at about 1. */
     for (int i = 0; i < textures_len; i++) {
-      if (rates[i] < reference * 0.5) {
+      if (rates[i] < best * 0.4 && rates[i] < 2.5e9) {
         printf("MECHAZYIU: tile buffer %d writes at %.1f GB/s (system memory), "
                "shrinking the tiles\n",
                i,
@@ -771,9 +859,8 @@ class Instance : public DrawEngine {
   }
 
   /**
-   * Render one sample of a tile into the accumulation buffers. `mix` is the weight of this
-   * sample in the mean. The viewport mean is read from `mean_tx_`, the final render's from the
-   * accumulation buffer.
+   * Render one sample of a tile and mix it into the mean with the weight `mix`: the viewport's
+   * mean (`mean_tx_`, with the depth in `view_depth_tx_`), or the tile's (final renders).
    */
   void render_sample(Manager &manager,
                      const float4x4 &viewmat,
@@ -799,13 +886,29 @@ class Instance : public DrawEngine {
      * passes sample it with scaled texture coordinates. */
     const float2 used = float2(tile.z, tile.w) / float2(tile_allocated_);
     proj_type_ = float4(proj_type_.x, 0.0f, used.x, used.y);
-    GPU_framebuffer_bind(gbuffer_fb_);
-    GPU_framebuffer_viewport_set(gbuffer_fb_, 0, 0, tile.z, tile.w);
-    const std::array<double4, 4> clear = {
-        double4(0.0), double4(0.0), double4(0.0), double4(0.0)};
-    GPU_framebuffer_multi_clear(gbuffer_fb_, clear);
-    GPU_framebuffer_clear_depth_stencil(gbuffer_fb_, 1.0f, 0x00);
-    manager.submit(gbuffer_ps_, view_);
+    if (caps_.multiple_targets) {
+      GPU_framebuffer_bind(gbuffer_fb_);
+      GPU_framebuffer_viewport_set(gbuffer_fb_, 0, 0, tile.z, tile.w);
+      const std::array<double4, 4> clear = {
+          double4(0.0), double4(0.0), double4(0.0), double4(0.0)};
+      GPU_framebuffer_multi_clear(gbuffer_fb_, clear);
+      GPU_framebuffer_clear_depth_stencil(gbuffer_fb_, 1.0f, 0x00);
+      manager.submit(gbuffer_ps_, view_);
+    }
+    else {
+      /* The surfaces once per target, the same depth each time. */
+      for (int i = 0; i < 4; i++) {
+        Framebuffer &fb = gbuffer_single_fb_[i];
+        GPU_framebuffer_bind(fb);
+        GPU_framebuffer_viewport_set(fb, 0, 0, tile.z, tile.w);
+        fb.clear_color(float4(0.0f));
+        if (i == 0) {
+          GPU_framebuffer_clear_depth_stencil(fb, 1.0f, 0x00);
+        }
+        gbuffer_target_ = float4(i == 0, i == 1, i == 2, i == 3);
+        manager.submit(gbuffer_ps_, view_);
+      }
+    }
 
     /* Screen passes cover the used part of the buffers: their rectangles are in the tile's
      * normalized coordinates, mapped by the viewport. */
@@ -825,20 +928,9 @@ class Instance : public DrawEngine {
       }
       world_sh_[axis + 1] = float4(sh, 0.0f);
     }
-    background_ = float4(world_.background, mix);
-    if (viewport) {
-      /* From the texture coordinates of the tile buffers to the view's. */
-      accum_src_ = mean_tx_;
-      const float2 mean_size(GPU_texture_width(mean_tx_), GPU_texture_height(mean_tx_));
-      accum_uv_ = float4(float2(tile_allocated_) / mean_size, float2(tile.x, tile.y) / mean_size);
-    }
-    else {
-      accum_src_ = accum_tx_[cur_];
-      accum_uv_ = float4(1.0f, 1.0f, 0.0f, 0.0f);
-    }
-    bind(accum_fb_[1 - cur_]);
+    background_ = float4(world_.background, 0.0f);
+    bind(accum_fb_[cur_]);
     manager.submit(base_ps_);
-    cur_ = 1 - cur_;
 
     /* Lights. */
     const float3x3 view_rotation = float3x3(viewmat);
@@ -867,8 +959,7 @@ class Instance : public DrawEngine {
       }
       const float3 forward = -math::normalize(view_rotation * light.object_to_world.z_axis());
       light_direction_ = float4(forward, 0.0f);
-      light_color_ = float4(light.intensity * (mix * float(M_1_PI)),
-                            light.specular_factor * 0.25f);
+      light_color_ = float4(light.intensity * float(M_1_PI), light.specular_factor * 0.25f);
       const float smooth = math::max(light.spot_smooth, 1e-4f);
       light_spot_ = float4(
           1.0f / smooth, -light.spot_cos_half / smooth, light.diffuse_factor, 0.0f);
@@ -883,6 +974,11 @@ class Instance : public DrawEngine {
       }
       rect_ = rect;
 
+      if (caps_.float_blending) {
+        bind(accum_fb_[cur_]);
+        manager.submit(light_ps_[int(light.type)]);
+        continue;
+      }
       accum_src_ = accum_tx_[cur_];
       bind(accum_fb_[1 - cur_]);
       manager.submit(light_ps_[int(light.type)]);
@@ -891,6 +987,42 @@ class Instance : public DrawEngine {
       bind(accum_fb_[cur_]);
       manager.submit(copy_ps_);
     }
+
+    /* Mix the sample into the mean (in the other buffer), then keep it. */
+    rect_ = float4(-1.0f, -1.0f, 1.0f, 1.0f);
+    copy_src_ = accum_tx_[cur_];
+    mix_weight_ = float4(mix);
+    const float2 tile_size(tile_allocated_);
+    if (viewport) {
+      mean_src_ = mean_tx_;
+      const float2 view_size(GPU_texture_width(mean_tx_), GPU_texture_height(mean_tx_));
+      uv_transform_ = float4(tile_size / view_size, float2(tile.x, tile.y) / view_size);
+    }
+    else {
+      mean_src_ = tile_mean_tx_;
+      uv_transform_ = float4(1.0f, 1.0f, 0.0f, 0.0f);
+    }
+    bind(accum_fb_[1 - cur_]);
+    manager.submit(mix_ps_);
+
+    copy_src_ = accum_tx_[1 - cur_];
+    if (!viewport) {
+      uv_transform_ = float4(1.0f, 1.0f, 0.0f, 0.0f);
+      bind(tile_mean_fb_);
+      manager.submit(copy_ps_);
+      return;
+    }
+    /* The tile's part of the view, and its depth for the overlays. */
+    proj_type_ = float4(proj_type_.x, 0.0f, 1.0f, 1.0f);
+    const float2 view_size(GPU_texture_width(mean_tx_), GPU_texture_height(mean_tx_));
+    rect_ = float4(float2(tile.x, tile.y) / view_size * 2.0f - 1.0f,
+                   float2(tile.x + tile.z, tile.y + tile.w) / view_size * 2.0f - 1.0f);
+    uv_transform_ = float4(view_size / tile_size, -float2(tile.x, tile.y) / tile_size);
+    GPU_framebuffer_bind(mean_fb_);
+    manager.submit(copy_ps_);
+    copy_src_ = gb_depth_tx_;
+    GPU_framebuffer_bind(view_depth_fb_);
+    manager.submit(copy_ps_);
   }
 
   /**
@@ -1037,6 +1169,10 @@ class Instance : public DrawEngine {
   void draw(Manager &manager) final
   {
     DefaultTextureList *dtxl = draw_ctx->viewport_texture_list_get();
+    if (!caps_.supported) {
+      STRNCPY(info, unsupported_message);
+      return;
+    }
     const int2 size(GPU_texture_width(dtxl->color), GPU_texture_height(dtxl->color));
     const View &main_view = View::default_get();
     const float4x4 viewmat = main_view.viewmat();
@@ -1088,19 +1224,6 @@ class Instance : public DrawEngine {
         const int4 tile = plan_.rect(t);
         render_sample(
             manager, viewmat, winmat, size, tile, sample_, offset, weight / weight_sum_, true);
-        /* Keep the tile's mean and depth. */
-        proj_type_ = float4(proj_type_.x, 0.0f, 1.0f, 1.0f);
-        const float2 view_size(size);
-        rect_ = float4(float2(tile.x, tile.y) / view_size * 2.0f - 1.0f,
-                       float2(tile.x + tile.z, tile.y + tile.w) / view_size * 2.0f - 1.0f);
-        const float2 tile_size(tile_allocated_);
-        uv_transform_ = float4(view_size / tile_size, -float2(tile.x, tile.y) / tile_size);
-        copy_src_ = accum_tx_[cur_];
-        GPU_framebuffer_bind(mean_fb_);
-        manager.submit(copy_ps_);
-        copy_src_ = gb_depth_tx_;
-        GPU_framebuffer_bind(view_depth_fb_);
-        manager.submit(copy_ps_);
       }
       sample_++;
     }
@@ -1142,6 +1265,10 @@ class Instance : public DrawEngine {
                     const float4x4 &winmat,
                     int2 size)
   {
+    if (!caps_.supported) {
+      RE_engine_report(engine, RPT_ERROR, unsupported_message);
+      return;
+    }
     tiles_ensure(size, false);
 
     RenderPass *combined = RE_pass_find_by_name(layer, RE_PASSNAME_COMBINED, viewname);
@@ -1149,8 +1276,7 @@ class Instance : public DrawEngine {
     const int tiles_len = plan_.len();
     for (const int t : IndexRange(tiles_len)) {
       const int4 tile = plan_.rect(t);
-      accum_tx_[0].clear(float4(0.0f));
-      accum_tx_[1].clear(float4(0.0f));
+      tile_mean_tx_.clear(float4(0.0f));
       float weight_sum = 0.0f;
       for (const int s : IndexRange(samples_len_)) {
         if (RE_engine_test_break(engine)) {
@@ -1171,7 +1297,7 @@ class Instance : public DrawEngine {
         debug_print(tile);
       }
       if (combined) {
-        tile_read(accum_tx_[cur_], tile, 4, combined->ibuf->float_data_for_write(), size, false);
+        tile_read(tile_mean_tx_, tile, 4, combined->ibuf->float_data_for_write(), size, false);
       }
       if (depth) {
         tile_read(gb_depth_tx_, tile, 1, depth->ibuf->float_data_for_write(), size, true);
@@ -1191,7 +1317,8 @@ class Instance : public DrawEngine {
            world_.background.z,
            int(lights_.size()),
            int(materials_.size()));
-    gpu::Texture *textures[] = {gb_diffuse_tx_, gb_normal_tx_, gb_depth_tx_, gb_specular_tx_, accum_tx_[cur_]};
+    gpu::Texture *textures[] = {
+        gb_diffuse_tx_, gb_normal_tx_, gb_depth_tx_, gb_specular_tx_, tile_mean_tx_};
     const char *names[] = {"diffuse", "normal", "depth", "specular", "accum"};
     for (int i = 0; i < 5; i++) {
       float *data = static_cast<float *>(GPU_texture_read(textures[i], GPU_DATA_FLOAT, 0));

@@ -119,6 +119,16 @@ class Context {
   }
   /** See #GPU_memory_evict_managed. */
   virtual void memory_evict_managed() {}
+  /** See #GPU_render_target_format_support. */
+  virtual bool render_target_format_support(TextureFormat /*format*/)
+  {
+    return true;
+  }
+  /** See #GPU_max_color_targets. */
+  virtual int max_color_targets()
+  {
+    return 8;
+  }
 
   virtual void debug_group_begin(const char * /*name*/, int /*index*/) {};
   virtual void debug_group_end() {};

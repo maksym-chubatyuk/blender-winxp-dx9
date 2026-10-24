@@ -63,6 +63,36 @@ ADDITIONAL_INFO(mechazyiu_gbuffer_texture_common)
 DO_STATIC_COMPILATION()
 GPU_SHADER_CREATE_END()
 
+/* The `_single` variants write one target per draw (hardware without multiple render targets). */
+GPU_SHADER_CREATE_INFO(mechazyiu_gbuffer_single_common)
+/* One-hot selection of the target written. */
+PUSH_CONSTANT(float4, gbuffer_target)
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_gbuffer_single)
+ADDITIONAL_INFO(mechazyiu_gbuffer_common)
+ADDITIONAL_INFO(mechazyiu_gbuffer_single_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_gbuffer_flip_single)
+ADDITIONAL_INFO(mechazyiu_gbuffer_common)
+ADDITIONAL_INFO(mechazyiu_gbuffer_single_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_gbuffer_texture_single)
+ADDITIONAL_INFO(mechazyiu_gbuffer_texture_common)
+ADDITIONAL_INFO(mechazyiu_gbuffer_single_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_gbuffer_texture_flip_single)
+ADDITIONAL_INFO(mechazyiu_gbuffer_texture_common)
+ADDITIONAL_INFO(mechazyiu_gbuffer_single_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
 /* Passes over a rectangle of the tile, reading the G-buffer. */
 GPU_SHADER_CREATE_INFO(mechazyiu_screen_common)
 VERTEX_SOURCE("mechazyiu_d3d9_vert.glsl")
@@ -85,18 +115,15 @@ SAMPLER(4, sampler2D, accum_tx)
 ADDITIONAL_INFO(mechazyiu_screen_common)
 GPU_SHADER_CREATE_END()
 
-/* First pass of a sample: world light, emission and the background, mixed with the previous
- * samples. */
+/* First pass of a sample: world light, emission and the background. */
 GPU_SHADER_CREATE_INFO(mechazyiu_base)
 SAMPLER(5, sampler2D, material_tx)
 /* World lighting, first order spherical harmonics of the irradiance divided by pi:
  * E(n) / pi = world_sh[0] + n.x * world_sh[1] + n.y * world_sh[2] + n.z * world_sh[3] (in view
  * space). world_sh[0].a: 1 when the background is transparent. */
 PUSH_CONSTANT_ARRAY(float4, world_sh, 4)
-/* Background color (rgb), a: weight of this sample in the running mean. */
+/* Background color (rgb). */
 PUSH_CONSTANT(float4, background)
-/* Previous mean: uv scale (xy) and offset (zw) from the tile to `accum_tx`. */
-PUSH_CONSTANT(float4, accum_uv)
 ADDITIONAL_INFO(mechazyiu_gbuffer_read)
 DO_STATIC_COMPILATION()
 GPU_SHADER_CREATE_END()
@@ -108,7 +135,7 @@ GPU_SHADER_CREATE_INFO(mechazyiu_light_common)
 PUSH_CONSTANT(float4, light_position)
 /* View space direction the light points to (spot, area), w: unused. */
 PUSH_CONSTANT(float4, light_direction)
-/* Radiant intensity (or irradiance for suns) times the sample weight / pi, w: specular factor / 4
+/* Radiant intensity (or irradiance for suns) / pi, w: specular factor / 4
  * (the 4 of the specular BRDF denominator). */
 PUSH_CONSTANT(float4, light_color)
 /* Spot: x = 1 / (cos blend start - cos size), y = -cos size * x. z: diffuse factor. */
@@ -123,7 +150,19 @@ ADDITIONAL_INFO(mechazyiu_light_common)
 DO_STATIC_COMPILATION()
 GPU_SHADER_CREATE_END()
 
+/* Added by blending (floating point blending hardware). */
+GPU_SHADER_CREATE_INFO(mechazyiu_light_point_blend)
+ADDITIONAL_INFO(mechazyiu_light_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
 GPU_SHADER_CREATE_INFO(mechazyiu_light_spot)
+ADDITIONAL_INFO(mechazyiu_light_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+/* Added by blending (floating point blending hardware). */
+GPU_SHADER_CREATE_INFO(mechazyiu_light_spot_blend)
 ADDITIONAL_INFO(mechazyiu_light_common)
 DO_STATIC_COMPILATION()
 GPU_SHADER_CREATE_END()
@@ -133,7 +172,19 @@ ADDITIONAL_INFO(mechazyiu_light_common)
 DO_STATIC_COMPILATION()
 GPU_SHADER_CREATE_END()
 
+/* Added by blending (floating point blending hardware). */
+GPU_SHADER_CREATE_INFO(mechazyiu_light_sun_blend)
+ADDITIONAL_INFO(mechazyiu_light_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
 GPU_SHADER_CREATE_INFO(mechazyiu_light_area)
+ADDITIONAL_INFO(mechazyiu_light_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+/* Added by blending (floating point blending hardware). */
+GPU_SHADER_CREATE_INFO(mechazyiu_light_area_blend)
 ADDITIONAL_INFO(mechazyiu_light_common)
 DO_STATIC_COMPILATION()
 GPU_SHADER_CREATE_END()
@@ -195,6 +246,17 @@ GPU_SHADER_CREATE_END()
 GPU_SHADER_CREATE_INFO(mechazyiu_copy)
 SAMPLER(0, sampler2D, source_tx)
 PUSH_CONSTANT(float4, uv_transform)
+ADDITIONAL_INFO(mechazyiu_screen_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+/* A sample mixed into the running mean (read through `uv_transform`). */
+GPU_SHADER_CREATE_INFO(mechazyiu_mix)
+SAMPLER(0, sampler2D, source_tx)
+SAMPLER(1, sampler2D, mean_tx)
+PUSH_CONSTANT(float4, uv_transform)
+/* x: weight of the sample. */
+PUSH_CONSTANT(float4, mix_weight)
 ADDITIONAL_INFO(mechazyiu_screen_common)
 DO_STATIC_COMPILATION()
 GPU_SHADER_CREATE_END()

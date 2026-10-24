@@ -99,6 +99,8 @@ class D3D9Context : public Context {
   int64_t render_target_budget() override;
   double texture_write_rate(Texture *texture) override;
   void memory_evict_managed() override;
+  bool render_target_format_support(TextureFormat format) override;
+  int max_color_targets() override;
 
   bool debug_capture_begin(const char * /*title*/) override
   {

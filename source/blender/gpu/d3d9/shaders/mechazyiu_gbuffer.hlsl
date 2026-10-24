@@ -4,7 +4,8 @@
 
 /**
  * MECHAZYIU surfaces into the G-buffer (`mechazyiu_gbuffer`, see `mechazyiu_common.hlsl`). Defines: TEXTURE
- * (the base color multiplies an image texture), FLIP (back faces: flipped normals).
+ * (the base color multiplies an image texture), FLIP (back faces: flipped normals), SINGLE (one
+ * target per draw, on hardware without multiple render targets: `gbuffer_target` selects it).
  */
 
 #include "d3d9_common.hlsl"
@@ -16,6 +17,10 @@ float4 view_buf[12];
 
 float4 mat_base;
 float4 mat_params;
+#ifdef SINGLE
+/* One-hot selection of the target written. */
+float4 gbuffer_target;
+#endif
 #ifdef TEXTURE
 sampler2D base_tx : register(s0);
 #endif
@@ -55,9 +60,18 @@ VertOut vert(VertIn v)
 
 struct FragOut {
   float4 diffuse : COLOR0;
+#ifndef SINGLE
   float4 normal : COLOR1;
   float4 depth : COLOR2;
   float4 specular : COLOR3;
+#endif
+};
+
+struct GBuffer {
+  float4 diffuse;
+  float4 normal;
+  float4 depth;
+  float4 specular;
 };
 
 FragOut frag(VertOut v)
@@ -67,10 +81,20 @@ FragOut frag(VertOut v)
   base *= tex2D(base_tx, v.uv).rgb;
 #endif
   float metallic = mat_params.x;
+  GBuffer g;
+  g.diffuse = float4(sqrt(base * (1.0 - metallic)), mat_params.y);
+  g.normal = float4(normalize(v.normal_depth.xyz) * 0.5 + 0.5, 0.0);
+  g.depth = v.normal_depth.wwww;
+  g.specular = float4(sqrt(lerp(mat_params.zzz, base, metallic)), mat_params.w);
   FragOut o;
-  o.diffuse = float4(sqrt(base * (1.0 - metallic)), mat_params.y);
-  o.normal = float4(normalize(v.normal_depth.xyz) * 0.5 + 0.5, 0.0);
-  o.depth = v.normal_depth.wwww;
-  o.specular = float4(sqrt(lerp(mat_params.zzz, base, metallic)), mat_params.w);
+#ifdef SINGLE
+  o.diffuse = g.diffuse * gbuffer_target.x + g.normal * gbuffer_target.y +
+              g.depth * gbuffer_target.z + g.specular * gbuffer_target.w;
+#else
+  o.diffuse = g.diffuse;
+  o.normal = g.normal;
+  o.depth = g.depth;
+  o.specular = g.specular;
+#endif
   return o;
 }

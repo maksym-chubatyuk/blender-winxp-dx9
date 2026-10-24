@@ -227,6 +227,12 @@ void D3D9Backend::capabilities_init()
                                                  D3DUSAGE_QUERY_POSTPIXELSHADER_BLENDING,
                                              D3DRTYPE_TEXTURE,
                                              D3DFMT_A16B16G16R16F));
+  /* `BLENDER_D3D9_NO_FLOAT_BLEND=1`: emulate hardware without it (R300). */
+  if (const char *emulate = getenv("BLENDER_D3D9_NO_FLOAT_BLEND")) {
+    if (emulate[0] && emulate[0] != '0') {
+      GCaps.float_blending_support = false;
+    }
+  }
   GCaps.hdr_viewport_support = false;
   GCaps.stencil_export_support = false;
   GCaps.max_parallel_compilations = 0;
