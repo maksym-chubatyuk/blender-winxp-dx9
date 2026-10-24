@@ -21,6 +21,8 @@ sampler2D gb_normal_tx : register(s1);
 sampler2D gb_depth_tx : register(s2);
 sampler2D gb_specular_tx : register(s3);
 sampler2D accum_tx : register(s4);
+/* Shadow of the light (`ember_shadow_mask.hlsl`), or a white texture. */
+sampler2D shadow_mask_tx : register(s5);
 
 float4 light_position;
 float4 light_direction;
@@ -34,6 +36,7 @@ float4 frag(VertOut v) : COLOR0
   float depth = tex2D(gb_depth_tx, v.uv).x;
   float4 gs = tex2D(gb_specular_tx, v.uv);
   float4 accum = tex2D(accum_tx, v.uv);
+  float shadow = tex2D(shadow_mask_tx, v.uv).x;
 
 #ifdef SUN
   float3 L = light_position.xyz;
@@ -73,5 +76,5 @@ float4 frag(VertOut v) : COLOR0
   float3 F = f0 + (1.0 - f0) * fc;
 
   float3 brdf = gd.rgb * gd.rgb * light_spot.z + F * (D_vis * light_color.w);
-  return accum + float4(brdf * light_color.rgb * (NL * attenuation), 0.0);
+  return accum + float4(brdf * light_color.rgb * (NL * attenuation * shadow), 0.0);
 }

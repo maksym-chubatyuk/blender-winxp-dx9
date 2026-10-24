@@ -82,8 +82,15 @@ using namespace draw;
 /** Materials of a view (the index is in the G-buffer, 8 bits). */
 constexpr int material_table_len = 256;
 
-/** Video memory per pixel of a tile: 4 G-buffer targets, depth, 2 half float accumulations. */
-constexpr int64_t tile_bytes_per_pixel = 4 * 4 + 4 + 2 * 8;
+/** Video memory per pixel of a tile: 4 G-buffer targets, depth, 2 half float accumulations, the
+ * shadow mask. */
+constexpr int64_t tile_bytes_per_pixel = 4 * 4 + 4 + 2 * 8 + 4;
+/** Shadow map atlas: 4 x 2 cells of 512 (the faces of point and area lights), or the left half
+ * (spots and suns). Single precision distances and their depth buffer. */
+constexpr int shadow_atlas_width = 2048;
+constexpr int shadow_atlas_height = 1024;
+constexpr int shadow_cube_size = 512;
+constexpr int64_t shadow_atlas_bytes = int64_t(shadow_atlas_width) * shadow_atlas_height * 8;
 /** Running mean (half float) and linear depth of the whole viewport. */
 constexpr int64_t view_bytes_per_pixel = 8 + 4;
 /** Render targets are at most 2048 pixels wide on R300 hardware. */
@@ -101,6 +108,9 @@ class ShaderCache {
   gpu::StaticShader base = {"ember_base"};
   gpu::StaticShader light[light_type_len] = {
       {"ember_light_point"}, {"ember_light_spot"}, {"ember_light_sun"}, {"ember_light_area"}};
+  gpu::StaticShader shadow[2 /*ortho*/] = {{"ember_shadow"}, {"ember_shadow_ortho"}};
+  gpu::StaticShader shadow_mask[3] = {
+      {"ember_shadow_mask_cube"}, {"ember_shadow_mask_spot"}, {"ember_shadow_mask_sun"}};
   gpu::StaticShader copy = {"ember_copy"};
   gpu::StaticShader output = {"ember_output"};
 
@@ -244,6 +254,15 @@ class Instance : public DrawEngine {
       {"ember.light_point"}, {"ember.light_spot"}, {"ember.light_sun"}, {"ember.light_area"}};
   PassSimple copy_ps_ = {"ember.copy"};
   PassSimple output_ps_ = {"ember.output"};
+  /** Shadow casters, perspective and orthographic. */
+  PassMain shadow_ps_[2] = {{"ember.shadow"}, {"ember.shadow_ortho"}};
+  /** Shadow masks of cube, spot and sun shadow maps. */
+  PassSimple shadow_mask_ps_[3] = {
+      {"ember.shadow_mask_cube"}, {"ember.shadow_mask_spot"}, {"ember.shadow_mask_sun"}};
+  View shadow_view_ = {"ember_shadow_view"};
+  /** World space bounds of the shadow casters (sun shadow maps cover them). */
+  float3 casters_min_ = float3(FLT_MAX);
+  float3 casters_max_ = float3(-FLT_MAX);
 
   /* Tile buffers. */
   Texture gb_diffuse_tx_ = {"ember.gb_diffuse"};
@@ -254,6 +273,15 @@ class Instance : public DrawEngine {
   Texture accum_tx_[2] = {{"ember.accum0"}, {"ember.accum1"}};
   Framebuffer gbuffer_fb_ = {"ember.gbuffer"};
   Framebuffer accum_fb_[2] = {{"ember.accum0"}, {"ember.accum1"}};
+  Texture shadow_mask_tx_ = {"ember.shadow_mask"};
+  Framebuffer shadow_mask_fb_ = {"ember.shadow_mask"};
+
+  /* Shadow maps. */
+  Texture shadow_tx_ = {"ember.shadow"};
+  Texture shadow_depth_tx_ = {"ember.shadow_depth"};
+  Framebuffer shadow_fb_ = {"ember.shadow"};
+  /** Lights without shadow read this instead of the mask. */
+  Texture white_tx_ = {"ember.white"};
   TilePlan plan_;
   int2 tile_allocated_ = int2(0);
   int64_t budget_ = 0;
@@ -284,6 +312,12 @@ class Instance : public DrawEngine {
   float4 depth_proj_ = float4(0.0f);
   gpu::Texture *accum_src_ = nullptr;
   gpu::Texture *copy_src_ = nullptr;
+  gpu::Texture *light_mask_src_ = nullptr;
+  float4 shadow_light_ = float4(0.0f);
+  float4 shadow_light_view_ = float4(0.0f);
+  float4 shadow_mat_[4] = {};
+  float4 shadow_params_ = float4(0.0f);
+  float4 shadow_bias_ = float4(1.0f, 0.0f, 0.0f, 0.0f);
 
   /* Viewport progressive sampling. */
   int sample_ = 0;
@@ -368,8 +402,31 @@ class Instance : public DrawEngine {
       ps.push_constant("light_direction", &light_direction_);
       ps.push_constant("light_color", &light_color_);
       ps.push_constant("light_spot", &light_spot_);
+      ps.bind_texture("shadow_mask_tx", &light_mask_src_);
       ps.draw_procedural(GPU_PRIM_TRIS, 1, 6);
     }
+
+    for (int ortho = 0; ortho < 2; ortho++) {
+      PassMain &ps = shadow_ps_[ortho];
+      ps.init();
+      ps.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_DEPTH | DRW_STATE_DEPTH_LESS_EQUAL);
+      ps.shader_set(shaders.shadow[ortho].get());
+      ps.push_constant("shadow_light", &shadow_light_);
+    }
+    for (int kind = 0; kind < 3; kind++) {
+      PassSimple &ps = shadow_mask_ps_[kind];
+      screen_pass(ps, shaders.shadow_mask[kind].get());
+      ps.bind_texture("gb_normal_tx", &gb_normal_tx_);
+      ps.bind_texture("gb_depth_tx", &gb_depth_tx_);
+      ps.bind_texture("shadow_tx", &shadow_tx_);
+      ps.push_constant("light_position", &shadow_light_view_);
+      ps.push_constant("shadow_mat", shadow_mat_, 4);
+      ps.push_constant("shadow_params", &shadow_params_);
+      ps.push_constant("shadow_bias", &shadow_bias_);
+      ps.draw_procedural(GPU_PRIM_TRIS, 1, 6);
+    }
+    casters_min_ = float3(FLT_MAX);
+    casters_max_ = float3(-FLT_MAX);
 
     screen_pass(copy_ps_, shaders.copy.get());
     copy_ps_.bind_texture("source_tx", &copy_src_);
@@ -459,6 +516,19 @@ class Instance : public DrawEngine {
     }
 
     ResourceHandleRange handle = manager.unique_handle(ob_ref);
+    const bool casts_shadow = (ob->visibility_flag & OB_HIDE_SHADOW) == 0;
+    if (casts_shadow) {
+      if (const std::optional<Bounds<float3>> bounds = BKE_object_boundbox_get(ob)) {
+        for (int corner = 0; corner < 8; corner++) {
+          const float3 local((corner & 1) ? bounds->max.x : bounds->min.x,
+                             (corner & 2) ? bounds->max.y : bounds->min.y,
+                             (corner & 4) ? bounds->max.z : bounds->min.z);
+          const float3 world = math::transform_point(ob->object_to_world(), local);
+          casters_min_ = math::min(casters_min_, world);
+          casters_max_ = math::max(casters_max_, world);
+        }
+      }
+    }
     for (const int i : IndexRange(math::min(material_len, int(batches.size())))) {
       if (batches[i] == nullptr) {
         continue;
@@ -470,6 +540,10 @@ class Instance : public DrawEngine {
       material_pass_get(index, textured, false).draw(batches[i], handle);
       if (!data.backface_culling) {
         material_pass_get(index, textured, true).draw(batches[i], handle);
+      }
+      if (casts_shadow) {
+        shadow_ps_[0].draw(batches[i], handle);
+        shadow_ps_[1].draw(batches[i], handle);
       }
     }
   }
@@ -485,6 +559,13 @@ class Instance : public DrawEngine {
                            int2(material_table_len, 1),
                            GPU_TEXTURE_USAGE_SHADER_READ);
     GPU_texture_update(material_tx_, GPU_DATA_FLOAT, table.data());
+    if (white_tx_.gpu_texture() == nullptr) {
+      const float4 white(1.0f);
+      white_tx_.ensure_2d(gpu::TextureFormat::UNORM_8_8_8_8,
+                          int2(1),
+                          GPU_TEXTURE_USAGE_SHADER_READ,
+                          white);
+    }
   }
 
   /* ------------------------------------------------------------------ */
@@ -511,7 +592,10 @@ class Instance : public DrawEngine {
       }
       available -= int64_t(size.x) * size.y * view_bytes_per_pixel;
     }
-    /* Keep video memory for the textures of the scene too. */
+    /* The shadow maps, and video memory for the textures of the scene too. */
+    if (shadow_tx_.gpu_texture() == nullptr) {
+      available -= shadow_atlas_bytes;
+    }
     available = math::max(available - texture_bytes_, int64_t(4) << 20);
 
     if (viewport) {
@@ -568,6 +652,12 @@ class Instance : public DrawEngine {
     gb_normal_tx_.ensure_2d(gpu::TextureFormat::UNORM_10_10_10_2, size, usage);
     gb_depth_tx_.ensure_2d(gpu::TextureFormat::SFLOAT_32, size, usage);
     gb_specular_tx_.ensure_2d(gpu::TextureFormat::UNORM_8_8_8_8, size, usage);
+    shadow_mask_tx_.ensure_2d(gpu::TextureFormat::UNORM_8_8_8_8, size, usage);
+    shadow_mask_fb_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(shadow_mask_tx_));
+    const int2 atlas_size(shadow_atlas_width, shadow_atlas_height);
+    shadow_tx_.ensure_2d(gpu::TextureFormat::SFLOAT_32, atlas_size, usage);
+    shadow_depth_tx_.ensure_2d(gpu::TextureFormat::SFLOAT_32_DEPTH_UINT_8, atlas_size, usage);
+    shadow_fb_.ensure(GPU_ATTACHMENT_TEXTURE(shadow_depth_tx_), GPU_ATTACHMENT_TEXTURE(shadow_tx_));
     depth_tx_.ensure_2d(gpu::TextureFormat::SFLOAT_32_DEPTH_UINT_8, size, usage);
     for (int i = 0; i < 2; i++) {
       accum_tx_[i].ensure_2d(gpu::TextureFormat::SFLOAT_16_16_16_16, size, usage);
@@ -587,6 +677,7 @@ class Instance : public DrawEngine {
     gb_normal_tx_.free();
     gb_depth_tx_.free();
     gb_specular_tx_.free();
+    shadow_mask_tx_.free();
     depth_tx_.free();
     accum_tx_[0].free();
     accum_tx_[1].free();
@@ -596,11 +687,18 @@ class Instance : public DrawEngine {
   /** False when some tile buffer writes at AGP memory speed. */
   bool tile_buffers_in_video_memory()
   {
-    gpu::Texture *textures[] = {
-        gb_diffuse_tx_, gb_normal_tx_, gb_depth_tx_, gb_specular_tx_, accum_tx_[0], accum_tx_[1]};
-    double rates[6];
+    gpu::Texture *textures[] = {gb_diffuse_tx_,
+                                gb_normal_tx_,
+                                gb_depth_tx_,
+                                gb_specular_tx_,
+                                accum_tx_[0],
+                                accum_tx_[1],
+                                shadow_mask_tx_,
+                                shadow_tx_};
+    constexpr int textures_len = 8;
+    double rates[textures_len];
     double best = 0.0;
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < textures_len; i++) {
       rates[i] = GPU_texture_write_rate(textures[i]);
       best = math::max(best, rates[i]);
     }
@@ -609,7 +707,7 @@ class Instance : public DrawEngine {
     }
     /* Video memory writes at 4 GB/s and more on the Radeon 9600, AGP memory at about 1. */
     const double reference = math::max(best, 3.0e9);
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < textures_len; i++) {
       if (rates[i] < reference * 0.5) {
         printf("Ember: tile buffer %d writes at %.1f GB/s (system memory), shrinking the tiles\n",
                i,
@@ -773,6 +871,15 @@ class Instance : public DrawEngine {
       const float smooth = math::max(light.spot_smooth, 1e-4f);
       light_spot_ = float4(
           1.0f / smooth, -light.spot_cos_half / smooth, light.diffuse_factor, 0.0f);
+      light_mask_src_ = white_tx_;
+      if (light.shadow && shadow_render(manager, light, world_pos, viewmat, sample)) {
+        rect_ = rect;
+        bind(shadow_mask_fb_);
+        proj_type_ = float4(proj_type_.x, 0.0f, used.x, used.y);
+        const int kind = light.type == LightType::SUN ? 2 : light.type == LightType::SPOT ? 1 : 0;
+        manager.submit(shadow_mask_ps_[kind]);
+        light_mask_src_ = shadow_mask_tx_;
+      }
       rect_ = rect;
 
       accum_src_ = accum_tx_[cur_];
@@ -783,6 +890,132 @@ class Instance : public DrawEngine {
       bind(accum_fb_[cur_]);
       manager.submit(copy_ps_);
     }
+  }
+
+  /**
+   * Render the shadow map of a light at a point of its shape, and set the parameters of its
+   * shadow mask pass. False when nothing casts shadows.
+   */
+  bool shadow_render(Manager &manager,
+                     const LightData &light,
+                     const float3 &world_pos,
+                     const float4x4 &viewmat,
+                     int sample)
+  {
+    if (casters_min_.x > casters_max_.x) {
+      return false;
+    }
+    const float4x4 viewinv = math::invert(viewmat);
+    GPU_framebuffer_bind(shadow_fb_);
+    /* Distances are normalized: 1 is nothing. */
+    GPU_framebuffer_clear_color_depth(shadow_fb_, double4(1.0), 1.0f);
+
+    /* Each sample looks up the map somewhere else in a texel. */
+    const float2 jitter = sample > 0 ?
+                              float2(halton(sample, 11), halton(sample, 13)) - 0.5f :
+                              float2(0.0f);
+    const float2 atlas_texel = 1.0f / float2(shadow_atlas_width, shadow_atlas_height);
+    shadow_params_ = float4(jitter * atlas_texel * 2.0f, 0.0f, 0.0f);
+
+    auto face_view = [](const float3 &right, const float3 &up, const float3 &forward,
+                        const float3 &origin) {
+      float4x4 m = float4x4::identity();
+      const float3 back = -forward;
+      for (int i = 0; i < 3; i++) {
+        m[i][0] = right[i];
+        m[i][1] = up[i];
+        m[i][2] = back[i];
+      }
+      m[3][0] = -math::dot(right, origin);
+      m[3][1] = -math::dot(up, origin);
+      m[3][2] = -math::dot(back, origin);
+      return m;
+    };
+
+    if (light.type == LightType::SUN) {
+      /* Orthographic, over the shadow casters. */
+      const float3 forward = -math::normalize(world_pos);
+      const float3 hint = math::abs(forward.z) < 0.9f ? float3(0.0f, 0.0f, 1.0f) :
+                                                        float3(1.0f, 0.0f, 0.0f);
+      const float3 right = math::normalize(math::cross(forward, hint));
+      const float3 up = math::cross(right, forward);
+      const float4x4 view = face_view(right, up, forward, float3(0.0f));
+      float3 lo(FLT_MAX), hi(-FLT_MAX);
+      for (int corner = 0; corner < 8; corner++) {
+        const float3 p((corner & 1) ? casters_max_.x : casters_min_.x,
+                       (corner & 2) ? casters_max_.y : casters_min_.y,
+                       (corner & 4) ? casters_max_.z : casters_min_.z);
+        const float3 v = math::transform_point(view, p);
+        lo = math::min(lo, v);
+        hi = math::max(hi, v);
+      }
+      const float margin = math::reduce_max(hi - lo) * 0.01f + 1e-3f;
+      lo -= margin;
+      hi += margin;
+      const float4x4 win = math::projection::orthographic(lo.x, hi.x, lo.y, hi.y, -hi.z, -lo.z);
+      shadow_view_.sync(view, win);
+      GPU_framebuffer_viewport_set(shadow_fb_, 0, 0, shadow_atlas_height, shadow_atlas_height);
+      manager.submit(shadow_ps_[1], shadow_view_);
+
+      const float4x4 view_to_clip = win * view * viewinv;
+      for (int i = 0; i < 4; i++) {
+        shadow_mat_[i] = view_to_clip[i];
+      }
+      const float texel = math::max(hi.x - lo.x, hi.y - lo.y) / float(shadow_atlas_height);
+      shadow_params_.w = texel * 1.5f;
+      shadow_bias_ = float4(1.0f, 2.0f * texel / (hi.z - lo.z), 0.0f, 0.0f);
+      return true;
+    }
+
+    const float far = light.influence_radius;
+    const float near = math::max(far * 1e-4f, 1e-3f);
+    shadow_light_ = float4(world_pos, 1.0f / far);
+    shadow_light_view_ = float4(math::transform_point(viewmat, world_pos), 1.0f / far);
+
+    if (light.type == LightType::SPOT) {
+      const float3 forward = -math::normalize(light.object_to_world.z_axis());
+      const float3 right = math::normalize(light.object_to_world.x_axis());
+      const float3 up = math::normalize(math::cross(right, forward));
+      const float4x4 view = face_view(math::cross(forward, up), up, forward, world_pos);
+      const float half_angle = math::min(math::acos(light.spot_cos_half) + 0.05f, 1.48f);
+      const float extent = math::tan(half_angle) * near;
+      const float4x4 win = math::projection::perspective(-extent, extent, -extent, extent, near, far);
+      shadow_view_.sync(view, win);
+      GPU_framebuffer_viewport_set(shadow_fb_, 0, 0, shadow_atlas_height, shadow_atlas_height);
+      manager.submit(shadow_ps_[0], shadow_view_);
+
+      const float4x4 view_to_clip = win * view * viewinv;
+      for (int i = 0; i < 4; i++) {
+        shadow_mat_[i] = view_to_clip[i];
+      }
+      shadow_params_.z = 1.5f * 2.0f * math::tan(half_angle) / float(shadow_atlas_height);
+      shadow_bias_ = float4(1.0f - 0.002f, 0.0f, 0.0f, 0.0f);
+      return true;
+    }
+
+    /* Point and area lights: 6 faces of 90 degrees, aligned with the view axes (the mask pass
+     * works in view space). */
+    const float3 axes[3] = {math::normalize(viewinv.x_axis()),
+                            math::normalize(viewinv.y_axis()),
+                            math::normalize(viewinv.z_axis())};
+    const float4x4 win = math::projection::perspective(-near, near, -near, near, near, far);
+    for (int face = 0; face < 6; face++) {
+      const int axis = face / 2;
+      const float3 forward = (face & 1) ? -axes[axis] : axes[axis];
+      /* The two other axes in order: the mask pass projects on them. */
+      const float3 &right = axes[axis == 0 ? 1 : 0];
+      const float3 &up = axes[axis == 2 ? 1 : 2];
+      shadow_view_.sync(face_view(right, up, forward, world_pos), win);
+      GPU_framebuffer_viewport_set(shadow_fb_,
+                                   (face % 4) * shadow_cube_size,
+                                   (face / 4) * shadow_cube_size,
+                                   shadow_cube_size,
+                                   shadow_cube_size);
+      manager.submit(shadow_ps_[0], shadow_view_);
+    }
+    shadow_params_.z = 2.5f * 2.0f / float(shadow_cube_size);
+    shadow_bias_ = float4(1.0f - 0.005f, 0.0f, 0.0f, 0.0f);
+    return true;
   }
 
   /** Weight of a sample's pixel offset, and the offset. */

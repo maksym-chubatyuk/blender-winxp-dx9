@@ -127,5 +127,10 @@ ember_light_point                              ember_light.hlsl
 ember_light_spot                               ember_light.hlsl SPOT
 ember_light_sun                                ember_light.hlsl SUN
 ember_light_area                               ember_light.hlsl AREA
+ember_shadow                                   ember_shadow.hlsl
+ember_shadow_ortho                             ember_shadow.hlsl ORTHO
+ember_shadow_mask_cube                         ember_shadow_mask.hlsl CUBE
+ember_shadow_mask_spot                         ember_shadow_mask.hlsl
+ember_shadow_mask_sun                          ember_shadow_mask.hlsl ORTHO
 ember_copy                                     ember_copy.hlsl
 ember_output                                   ember_copy.hlsl OUTPUT

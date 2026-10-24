@@ -82,6 +82,7 @@ struct LightData {
   float spot_smooth = 0.0f;
   float diffuse_factor = 1.0f;
   float specular_factor = 1.0f;
+  bool shadow = true;
   /** Distance where the light stops being computed. */
   float influence_radius = 0.0f;
 };

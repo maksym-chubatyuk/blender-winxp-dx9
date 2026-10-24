@@ -12,6 +12,7 @@
 #include "BLI_math_matrix.hh"
 #include "BLI_math_vector.hh"
 
+#include "BKE_colorband.hh"
 #include "BKE_image.hh"
 #include "BKE_light.h"
 #include "BKE_node_legacy_types.hh"
@@ -68,7 +69,10 @@ static float input_float(const bNode &node, StringRef identifier, float fallback
   return socket->default_value_typed<bNodeSocketValueFloat>()->value;
 }
 
-/** Color of an input: an RGB node linked to it, or its own value. */
+/**
+ * Color of an input: from an RGB node or a color ramp linked to it (at its factor, or its mean
+ * color when the factor varies), or the input's own value.
+ */
 static float3 input_color(const bNode &node, StringRef identifier, float3 fallback)
 {
   const bNodeSocket *socket = input_find(node, identifier);
@@ -76,8 +80,24 @@ static float3 input_color(const bNode &node, StringRef identifier, float3 fallba
     return fallback;
   }
   if (const bNodeSocket *from = input_link_get(socket)) {
-    if (from->owner_node().type_legacy == SH_NODE_RGB) {
+    const bNode &from_node = from->owner_node();
+    if (from_node.type_legacy == SH_NODE_RGB) {
       return float3(from->default_value_typed<bNodeSocketValueRGBA>()->value);
+    }
+    if (from_node.type_legacy == SH_NODE_VALTORGB && from_node.storage) {
+      const ColorBand *ramp = static_cast<const ColorBand *>(from_node.storage);
+      const bNodeSocket *fac = input_find(from_node, "Fac");
+      float4 color;
+      if (fac && !input_link_get(fac)) {
+        BKE_colorband_evaluate(ramp, fac->default_value_typed<bNodeSocketValueFloat>()->value, color);
+        return float3(color);
+      }
+      float3 sum(0.0f);
+      for (int i = 0; i < 16; i++) {
+        BKE_colorband_evaluate(ramp, (float(i) + 0.5f) / 16.0f, color);
+        sum += float3(color);
+      }
+      return sum / 16.0f;
     }
   }
   return float3(socket->default_value_typed<bNodeSocketValueRGBA>()->value);
@@ -260,6 +280,7 @@ LightData light_data_get(const Object &ob, float light_threshold)
   const float3 power = BKE_light_color(la) * BKE_light_power(la);
   light.diffuse_factor = la.diff_fac;
   light.specular_factor = la.spec_fac;
+  light.shadow = (la.mode & LA_SHADOW) != 0;
   /* Conversions of Cycles (`scene/light.cpp`): point and spot lights radiate their power in all
    * directions, area lights from one side (Lambertian), sun strengths are irradiances. */
   switch (la.type) {

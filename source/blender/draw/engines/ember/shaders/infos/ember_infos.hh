@@ -113,6 +113,8 @@ PUSH_CONSTANT(float4, light_direction)
 PUSH_CONSTANT(float4, light_color)
 /* Spot: x = 1 / (cos blend start - cos size), y = -cos size * x. z: diffuse factor. */
 PUSH_CONSTANT(float4, light_spot)
+/* Shadow of the light, or a white texture. */
+SAMPLER(5, sampler2D, shadow_mask_tx)
 ADDITIONAL_INFO(ember_gbuffer_read)
 GPU_SHADER_CREATE_END()
 
@@ -133,6 +135,59 @@ GPU_SHADER_CREATE_END()
 
 GPU_SHADER_CREATE_INFO(ember_light_area)
 ADDITIONAL_INFO(ember_light_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+/* Shadow maps: the surfaces seen from a light, normalized distance to it (orthographic: depth). */
+GPU_SHADER_CREATE_INFO(ember_shadow_common)
+VERTEX_IN(0, float3, pos)
+VERTEX_SOURCE("ember_d3d9_vert.glsl")
+FRAGMENT_SOURCE("ember_d3d9_frag.glsl")
+/* xyz: light position (world space), w: 1 / far distance. */
+PUSH_CONSTANT(float4, shadow_light)
+FRAGMENT_OUT(0, float, out_distance)
+ADDITIONAL_INFO(draw_view)
+ADDITIONAL_INFO(draw_modelmat)
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(ember_shadow)
+ADDITIONAL_INFO(ember_shadow_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(ember_shadow_ortho)
+ADDITIONAL_INFO(ember_shadow_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+/* Shadow of a light over its rectangle, for the light pass. */
+GPU_SHADER_CREATE_INFO(ember_shadow_mask_common)
+SAMPLER(1, sampler2D, gb_normal_tx)
+SAMPLER(2, sampler2D, gb_depth_tx)
+SAMPLER(6, sampler2D, shadow_tx)
+/* View space light position, w: 1 / far distance. */
+PUSH_CONSTANT(float4, light_position)
+/* Spot and sun: view space to the light's clip space (columns). */
+PUSH_CONSTANT_ARRAY(float4, shadow_mat, 4)
+/* xy: lookup offset, z: normal offset per unit of distance, w: constant normal offset. */
+PUSH_CONSTANT(float4, shadow_params)
+/* Depth bias: lit when `ref * x - y <= occluder`. */
+PUSH_CONSTANT(float4, shadow_bias)
+ADDITIONAL_INFO(ember_screen_common)
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(ember_shadow_mask_cube)
+ADDITIONAL_INFO(ember_shadow_mask_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(ember_shadow_mask_spot)
+ADDITIONAL_INFO(ember_shadow_mask_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(ember_shadow_mask_sun)
+ADDITIONAL_INFO(ember_shadow_mask_common)
 DO_STATIC_COMPILATION()
 GPU_SHADER_CREATE_END()
 
