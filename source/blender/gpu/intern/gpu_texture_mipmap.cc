@@ -10,6 +10,7 @@
 
 #include "GPU_capabilities.hh"
 #include "GPU_compute.hh"
+#include "GPU_context.hh"
 #include "GPU_debug.hh"
 #include "GPU_shader.hh"
 #include "GPU_shader_builtin.hh"
@@ -231,6 +232,10 @@ void GPU_texture_update_mipmap_chain(Texture *tex)
     CLOG_TRACE(&LOG,
                "Texture doesn't have `GPU_TEXTURE_USAGE_SHADER_WRITE` set. Fallback to backend "
                "implementation");
+    use_compute_shaders = false;
+  }
+  if (GPU_backend_get_type() == GPU_BACKEND_D3D9) {
+    /* No compute shaders, the backend filters on the CPU. */
     use_compute_shaders = false;
   }
 

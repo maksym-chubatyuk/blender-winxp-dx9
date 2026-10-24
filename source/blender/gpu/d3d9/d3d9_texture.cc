@@ -1150,9 +1150,14 @@ void D3D9Texture::generate_mipmap()
   if (source_ || device_levels_ <= 1 || tex2d_ == nullptr || is_render_target_) {
     return;
   }
-  if (device_format_.kind != D3D9TexelKind::UNORM8) {
+  if (!ELEM(device_format_.kind,
+            D3D9TexelKind::UNORM8,
+            D3D9TexelKind::HALF,
+            D3D9TexelKind::FLOAT))
+  {
     return;
   }
+  const bool unorm8 = device_format_.kind == D3D9TexelKind::UNORM8;
   /* Box filter each level from the previous one. */
   const int texel = d3d9_texel_size(device_format_);
   for (int level = 1; level < device_levels_; level++) {
@@ -1176,10 +1181,23 @@ void D3D9Texture::generate_mipmap()
       for (uint x = 0; x < dst_desc.Width; x++) {
         const uint x0 = min_uu(x * 2, src_desc.Width - 1) * texel;
         const uint x1 = min_uu(x * 2 + 1, src_desc.Width - 1) * texel;
-        for (int c = 0; c < texel; c++) {
-          d[x * texel + c] = uint8_t(
-              (uint(row0[x0 + c]) + row0[x1 + c] + row1[x0 + c] + row1[x1 + c] + 2) / 4);
+        if (unorm8) {
+          for (int c = 0; c < texel; c++) {
+            d[x * texel + c] = uint8_t(
+                (uint(row0[x0 + c]) + row0[x1 + c] + row1[x0 + c] + row1[x1 + c] + 2) / 4);
+          }
+          continue;
         }
+        /* Float formats: through floats. */
+        float sum[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        for (const uint8_t *texel_src : {row0 + x0, row0 + x1, row1 + x0, row1 + x1}) {
+          float value[4];
+          device_texel_decode(device_format_, texel_src, value);
+          for (int c = 0; c < 4; c++) {
+            sum[c] += value[c] * 0.25f;
+          }
+        }
+        device_texel_encode(device_format_, sum, d + x * texel);
       }
     }
     tex2d_->UnlockRect(level);
