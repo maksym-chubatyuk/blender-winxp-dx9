@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
 /**
- * One light of an Ember sample (`ember_light_*`), added to the running mean over the rectangle
+ * One light of an MECHAZYIU sample (`mechazyiu_light_*`), added to the running mean over the rectangle
  * the light reaches. Defines: SUN, SPOT, AREA (point light without any).
  *
  * Lambert diffuse and GGX specular (Kelemen visibility, Schlick Fresnel): the cheaper terms keep
@@ -13,15 +13,15 @@
  */
 
 #include "d3d9_common.hlsl"
-#define EMBER_SCREEN_PASS
-#include "ember_common.hlsl"
+#define MECHAZYIU_SCREEN_PASS
+#include "mechazyiu_common.hlsl"
 
 sampler2D gb_diffuse_tx : register(s0);
 sampler2D gb_normal_tx : register(s1);
 sampler2D gb_depth_tx : register(s2);
 sampler2D gb_specular_tx : register(s3);
 sampler2D accum_tx : register(s4);
-/* Shadow of the light (`ember_shadow_mask.hlsl`), or a white texture. */
+/* Shadow of the light (`mechazyiu_shadow_mask.hlsl`), or a white texture. */
 sampler2D shadow_mask_tx : register(s5);
 
 float4 light_position;
@@ -32,7 +32,7 @@ float4 light_spot;
 float4 frag(VertOut v) : COLOR0
 {
   float4 gd = tex2D(gb_diffuse_tx, v.uv);
-  float3 n = ember_normal_decode(tex2D(gb_normal_tx, v.uv).xyz);
+  float3 n = mechazyiu_normal_decode(tex2D(gb_normal_tx, v.uv).xyz);
   float depth = tex2D(gb_depth_tx, v.uv).x;
   float4 gs = tex2D(gb_specular_tx, v.uv);
   float4 accum = tex2D(accum_tx, v.uv);

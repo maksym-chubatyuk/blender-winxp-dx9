@@ -3036,9 +3036,9 @@ bool BKE_scene_use_spherical_stereo(Scene *scene)
 
 bool BKE_scene_uses_blender_eevee(const Scene *scene)
 {
-  /* XP port: Ember replaces EEVEE (material previews, shading types). */
+  /* XP port: MECHAZYIU replaces EEVEE (material previews, shading types). */
   return STREQ(scene->r.engine, RE_engine_id_BLENDER_EEVEE) ||
-         STREQ(scene->r.engine, "BLENDER_EMBER");
+         STREQ(scene->r.engine, "BLENDER_MECHAZYIU");
 }
 
 bool BKE_scene_uses_blender_workbench(const Scene *scene)

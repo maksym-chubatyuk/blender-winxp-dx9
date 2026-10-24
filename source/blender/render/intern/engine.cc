@@ -104,9 +104,9 @@ RenderEngineType *RE_engines_find(const char *idname)
   RenderEngineType *type = static_cast<RenderEngineType *>(
       BLI_findstring(&R_engines, idname, offsetof(RenderEngineType, idname)));
   if (!type) {
-    /* XP port: EEVEE isn't available, Ember replaces it. */
+    /* XP port: EEVEE isn't available, MECHAZYIU replaces it. */
     type = static_cast<RenderEngineType *>(
-        BLI_findstring(&R_engines, "BLENDER_EMBER", offsetof(RenderEngineType, idname)));
+        BLI_findstring(&R_engines, "BLENDER_MECHAZYIU", offsetof(RenderEngineType, idname)));
   }
 
   return type;

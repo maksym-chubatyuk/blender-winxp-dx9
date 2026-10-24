@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
 /**
- * Ember shadow of one light (`ember_shadow_mask_*`): 1 where the G-buffer surface sees the light,
+ * MECHAZYIU shadow of one light (`mechazyiu_shadow_mask_*`): 1 where the G-buffer surface sees the light,
  * over the rectangle the light reaches. Defines: CUBE (point and area lights: 6 faces of 90
  * degrees around the light, aligned with the view axes), ORTHO (suns), none (spots).
  *
@@ -13,8 +13,8 @@
  */
 
 #include "d3d9_common.hlsl"
-#define EMBER_SCREEN_PASS
-#include "ember_common.hlsl"
+#define MECHAZYIU_SCREEN_PASS
+#include "mechazyiu_common.hlsl"
 
 sampler2D gb_normal_tx : register(s1);
 sampler2D gb_depth_tx : register(s2);
@@ -32,7 +32,7 @@ float4 shadow_bias;
 
 float4 frag(VertOut v) : COLOR0
 {
-  float3 n = ember_normal_decode(tex2D(gb_normal_tx, v.uv).xyz);
+  float3 n = mechazyiu_normal_decode(tex2D(gb_normal_tx, v.uv).xyz);
   float depth = tex2D(gb_depth_tx, v.uv).x;
   float3 P = v.ray_origin + v.ray_dir * depth;
 

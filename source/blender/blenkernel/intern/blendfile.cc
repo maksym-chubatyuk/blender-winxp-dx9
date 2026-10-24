@@ -1333,14 +1333,14 @@ static void handle_subversion_warning(Main *main, BlendFileReadReport *reports)
 }
 
 /**
- * XP port: EEVEE needs newer GPUs than Direct3D 9 ones, scenes using it use Ember, its
+ * XP port: EEVEE needs newer GPUs than Direct3D 9 ones, scenes using it use MECHAZYIU, its
  * replacement.
  */
 static void xp_port_replace_eevee(Main *bmain)
 {
   for (Scene &scene : bmain->scenes) {
     if (STRPREFIX(scene.r.engine, "BLENDER_EEVEE")) {
-      STRNCPY(scene.r.engine, "BLENDER_EMBER");
+      STRNCPY(scene.r.engine, "BLENDER_MECHAZYIU");
     }
   }
 }

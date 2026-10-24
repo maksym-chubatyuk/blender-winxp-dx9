@@ -3,13 +3,13 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
 /**
- * First pass of an Ember sample (`ember_base`): world lighting, emission and the background,
+ * First pass of an MECHAZYIU sample (`mechazyiu_base`): world lighting, emission and the background,
  * mixed into the running mean of the previous samples.
  */
 
 #include "d3d9_common.hlsl"
-#define EMBER_SCREEN_PASS
-#include "ember_common.hlsl"
+#define MECHAZYIU_SCREEN_PASS
+#include "mechazyiu_common.hlsl"
 
 sampler2D gb_diffuse_tx : register(s0);
 sampler2D gb_normal_tx : register(s1);
@@ -32,7 +32,7 @@ float3 world_light(float3 n)
 float4 frag(VertOut v) : COLOR0
 {
   float4 gd = tex2D(gb_diffuse_tx, v.uv);
-  float3 n = ember_normal_decode(tex2D(gb_normal_tx, v.uv).xyz);
+  float3 n = mechazyiu_normal_decode(tex2D(gb_normal_tx, v.uv).xyz);
   float depth = tex2D(gb_depth_tx, v.uv).x;
   float4 gs = tex2D(gb_specular_tx, v.uv);
   float4 prev = tex2D(accum_tx, v.uv * accum_uv.xy + accum_uv.zw);

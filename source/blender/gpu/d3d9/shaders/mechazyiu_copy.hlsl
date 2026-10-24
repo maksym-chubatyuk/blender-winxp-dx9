@@ -3,13 +3,13 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
 /**
- * Ember rectangle copy (`ember_copy`), and the viewport output (`ember_output`, define OUTPUT):
+ * MECHAZYIU rectangle copy (`mechazyiu_copy`), and the viewport output (`mechazyiu_output`, define OUTPUT):
  * the running mean and the depth of the G-buffer for the overlays.
  */
 
 #include "d3d9_common.hlsl"
-#define EMBER_SCREEN_PASS
-#include "ember_common.hlsl"
+#define MECHAZYIU_SCREEN_PASS
+#include "mechazyiu_common.hlsl"
 
 sampler2D source_tx : register(s0);
 float4 uv_transform;

@@ -14,9 +14,9 @@ namespace blender {
 
 struct RenderEngineType;
 
-extern RenderEngineType DRW_engine_viewport_ember_type;
+extern RenderEngineType DRW_engine_viewport_mechazyiu_type;
 
-namespace ember {
+namespace mechazyiu {
 
 struct Engine : public DrawEngine::Pointer {
   DrawEngine *create_instance() final;
@@ -24,5 +24,5 @@ struct Engine : public DrawEngine::Pointer {
   static void free_static();
 };
 
-}  // namespace ember
+}  // namespace mechazyiu
 }  // namespace blender

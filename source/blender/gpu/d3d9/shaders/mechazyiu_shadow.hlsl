@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
 /**
- * Ember shadow maps (`ember_shadow`, `ember_shadow_ortho` with define ORTHO): the surfaces seen
+ * MECHAZYIU shadow maps (`mechazyiu_shadow`, `mechazyiu_shadow_ortho` with define ORTHO): the surfaces seen
  * from a light, storing the normalized distance to it (orthographic: the depth), compared by
- * `ember_shadow_mask.hlsl`.
+ * `mechazyiu_shadow_mask.hlsl`.
  */
 
 #include "d3d9_common.hlsl"

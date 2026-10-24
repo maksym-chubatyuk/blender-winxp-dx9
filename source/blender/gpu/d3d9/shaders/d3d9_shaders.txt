@@ -117,20 +117,20 @@ image_engine_image_shader                      image_engine_image.hlsl
 overlay_grid_background                        overlay_grid_background.hlsl
 overlay_grid_image                             overlay_grid_background.hlsl IMAGE
 
-# Ember render engine (draw/engines/ember).
-ember_gbuffer                                  ember_gbuffer.hlsl
-ember_gbuffer_flip                             ember_gbuffer.hlsl FLIP
-ember_gbuffer_texture                          ember_gbuffer.hlsl TEXTURE
-ember_gbuffer_texture_flip                     ember_gbuffer.hlsl TEXTURE FLIP
-ember_base                                     ember_base.hlsl
-ember_light_point                              ember_light.hlsl
-ember_light_spot                               ember_light.hlsl SPOT
-ember_light_sun                                ember_light.hlsl SUN
-ember_light_area                               ember_light.hlsl AREA
-ember_shadow                                   ember_shadow.hlsl
-ember_shadow_ortho                             ember_shadow.hlsl ORTHO
-ember_shadow_mask_cube                         ember_shadow_mask.hlsl CUBE
-ember_shadow_mask_spot                         ember_shadow_mask.hlsl
-ember_shadow_mask_sun                          ember_shadow_mask.hlsl ORTHO
-ember_copy                                     ember_copy.hlsl
-ember_output                                   ember_copy.hlsl OUTPUT
+# MECHAZYIU render engine (draw/engines/mechazyiu).
+mechazyiu_gbuffer                                  mechazyiu_gbuffer.hlsl
+mechazyiu_gbuffer_flip                             mechazyiu_gbuffer.hlsl FLIP
+mechazyiu_gbuffer_texture                          mechazyiu_gbuffer.hlsl TEXTURE
+mechazyiu_gbuffer_texture_flip                     mechazyiu_gbuffer.hlsl TEXTURE FLIP
+mechazyiu_base                                     mechazyiu_base.hlsl
+mechazyiu_light_point                              mechazyiu_light.hlsl
+mechazyiu_light_spot                               mechazyiu_light.hlsl SPOT
+mechazyiu_light_sun                                mechazyiu_light.hlsl SUN
+mechazyiu_light_area                               mechazyiu_light.hlsl AREA
+mechazyiu_shadow                                   mechazyiu_shadow.hlsl
+mechazyiu_shadow_ortho                             mechazyiu_shadow.hlsl ORTHO
+mechazyiu_shadow_mask_cube                         mechazyiu_shadow_mask.hlsl CUBE
+mechazyiu_shadow_mask_spot                         mechazyiu_shadow_mask.hlsl
+mechazyiu_shadow_mask_sun                          mechazyiu_shadow_mask.hlsl ORTHO
+mechazyiu_copy                                     mechazyiu_copy.hlsl
+mechazyiu_output                                   mechazyiu_copy.hlsl OUTPUT

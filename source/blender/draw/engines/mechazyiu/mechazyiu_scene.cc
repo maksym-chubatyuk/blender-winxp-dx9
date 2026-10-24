@@ -5,7 +5,7 @@
 /** \file
  * \ingroup draw_engine
  *
- * Scene data of Ember: materials read from their node trees, lights, world lighting.
+ * Scene data of MECHAZYIU: materials read from their node trees, lights, world lighting.
  */
 
 #include "BLI_math_base.hh"
@@ -32,9 +32,9 @@
 
 #include "NOD_shader.h"
 
-#include "ember_private.hh"
+#include "mechazyiu_private.hh"
 
-namespace blender::ember {
+namespace blender::mechazyiu {
 
 /* -------------------------------------------------------------------- */
 /** \name Node Tree Reading
@@ -525,4 +525,4 @@ float halton(int index, int base)
 
 /** \} */
 
-}  // namespace blender::ember
+}  // namespace blender::mechazyiu

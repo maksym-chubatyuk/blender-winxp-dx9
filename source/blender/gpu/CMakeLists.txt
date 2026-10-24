@@ -26,7 +26,7 @@ set(INC
   ../draw/engines/select/shaders/infos
   ../draw/engines/workbench
   ../draw/engines/workbench/shaders/infos
-  ../draw/engines/ember/shaders/infos
+  ../draw/engines/mechazyiu/shaders/infos
   ../draw/intern
   ../draw/intern/shaders
   metal/kernels

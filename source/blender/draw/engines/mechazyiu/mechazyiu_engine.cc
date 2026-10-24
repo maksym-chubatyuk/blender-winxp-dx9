@@ -5,7 +5,7 @@
 /** \file
  * \ingroup draw_engine
  *
- * Ember render engine: see `ember_private.hh`.
+ * MECHAZYIU render engine: see `mechazyiu_private.hh`.
  *
  * A sample of a tile:
  * 1. The surfaces fill the G-buffer (4 render targets).
@@ -70,12 +70,12 @@
 #include "draw_view.hh"
 #include "draw_view_data.hh"
 
-#include "ember_engine.h" /* Own include. */
-#include "ember_private.hh"
+#include "mechazyiu_engine.h" /* Own include. */
+#include "mechazyiu_private.hh"
 
 namespace blender {
 
-namespace ember {
+namespace mechazyiu {
 
 using namespace draw;
 
@@ -103,16 +103,16 @@ constexpr int max_tile_size = 2048;
 class ShaderCache {
  public:
   gpu::StaticShader gbuffer[2 /*texture*/][2 /*flip*/] = {
-      {{"ember_gbuffer"}, {"ember_gbuffer_flip"}},
-      {{"ember_gbuffer_texture"}, {"ember_gbuffer_texture_flip"}}};
-  gpu::StaticShader base = {"ember_base"};
+      {{"mechazyiu_gbuffer"}, {"mechazyiu_gbuffer_flip"}},
+      {{"mechazyiu_gbuffer_texture"}, {"mechazyiu_gbuffer_texture_flip"}}};
+  gpu::StaticShader base = {"mechazyiu_base"};
   gpu::StaticShader light[light_type_len] = {
-      {"ember_light_point"}, {"ember_light_spot"}, {"ember_light_sun"}, {"ember_light_area"}};
-  gpu::StaticShader shadow[2 /*ortho*/] = {{"ember_shadow"}, {"ember_shadow_ortho"}};
+      {"mechazyiu_light_point"}, {"mechazyiu_light_spot"}, {"mechazyiu_light_sun"}, {"mechazyiu_light_area"}};
+  gpu::StaticShader shadow[2 /*ortho*/] = {{"mechazyiu_shadow"}, {"mechazyiu_shadow_ortho"}};
   gpu::StaticShader shadow_mask[3] = {
-      {"ember_shadow_mask_cube"}, {"ember_shadow_mask_spot"}, {"ember_shadow_mask_sun"}};
-  gpu::StaticShader copy = {"ember_copy"};
-  gpu::StaticShader output = {"ember_output"};
+      {"mechazyiu_shadow_mask_cube"}, {"mechazyiu_shadow_mask_spot"}, {"mechazyiu_shadow_mask_sun"}};
+  gpu::StaticShader copy = {"mechazyiu_copy"};
+  gpu::StaticShader output = {"mechazyiu_output"};
 
   static gpu::StaticShaderCache<ShaderCache> &static_cache()
   {
@@ -226,7 +226,7 @@ class Instance : public DrawEngine {
   const DRWContext *draw_ctx = nullptr;
 
  private:
-  View view_ = {"ember_view"};
+  View view_ = {"mechazyiu_view"};
 
   /* Scene. */
   const Scene *scene_ = nullptr;
@@ -248,40 +248,40 @@ class Instance : public DrawEngine {
   Vector<GPUMaterial *> dummy_gpu_materials_;
 
   /* Passes. */
-  PassMain gbuffer_ps_ = {"ember.gbuffer"};
-  PassSimple base_ps_ = {"ember.base"};
+  PassMain gbuffer_ps_ = {"mechazyiu.gbuffer"};
+  PassSimple base_ps_ = {"mechazyiu.base"};
   PassSimple light_ps_[light_type_len] = {
-      {"ember.light_point"}, {"ember.light_spot"}, {"ember.light_sun"}, {"ember.light_area"}};
-  PassSimple copy_ps_ = {"ember.copy"};
-  PassSimple output_ps_ = {"ember.output"};
+      {"mechazyiu.light_point"}, {"mechazyiu.light_spot"}, {"mechazyiu.light_sun"}, {"mechazyiu.light_area"}};
+  PassSimple copy_ps_ = {"mechazyiu.copy"};
+  PassSimple output_ps_ = {"mechazyiu.output"};
   /** Shadow casters, perspective and orthographic. */
-  PassMain shadow_ps_[2] = {{"ember.shadow"}, {"ember.shadow_ortho"}};
+  PassMain shadow_ps_[2] = {{"mechazyiu.shadow"}, {"mechazyiu.shadow_ortho"}};
   /** Shadow masks of cube, spot and sun shadow maps. */
   PassSimple shadow_mask_ps_[3] = {
-      {"ember.shadow_mask_cube"}, {"ember.shadow_mask_spot"}, {"ember.shadow_mask_sun"}};
-  View shadow_view_ = {"ember_shadow_view"};
+      {"mechazyiu.shadow_mask_cube"}, {"mechazyiu.shadow_mask_spot"}, {"mechazyiu.shadow_mask_sun"}};
+  View shadow_view_ = {"mechazyiu_shadow_view"};
   /** World space bounds of the shadow casters (sun shadow maps cover them). */
   float3 casters_min_ = float3(FLT_MAX);
   float3 casters_max_ = float3(-FLT_MAX);
 
   /* Tile buffers. */
-  Texture gb_diffuse_tx_ = {"ember.gb_diffuse"};
-  Texture gb_normal_tx_ = {"ember.gb_normal"};
-  Texture gb_depth_tx_ = {"ember.gb_depth"};
-  Texture gb_specular_tx_ = {"ember.gb_specular"};
-  Texture depth_tx_ = {"ember.depth"};
-  Texture accum_tx_[2] = {{"ember.accum0"}, {"ember.accum1"}};
-  Framebuffer gbuffer_fb_ = {"ember.gbuffer"};
-  Framebuffer accum_fb_[2] = {{"ember.accum0"}, {"ember.accum1"}};
-  Texture shadow_mask_tx_ = {"ember.shadow_mask"};
-  Framebuffer shadow_mask_fb_ = {"ember.shadow_mask"};
+  Texture gb_diffuse_tx_ = {"mechazyiu.gb_diffuse"};
+  Texture gb_normal_tx_ = {"mechazyiu.gb_normal"};
+  Texture gb_depth_tx_ = {"mechazyiu.gb_depth"};
+  Texture gb_specular_tx_ = {"mechazyiu.gb_specular"};
+  Texture depth_tx_ = {"mechazyiu.depth"};
+  Texture accum_tx_[2] = {{"mechazyiu.accum0"}, {"mechazyiu.accum1"}};
+  Framebuffer gbuffer_fb_ = {"mechazyiu.gbuffer"};
+  Framebuffer accum_fb_[2] = {{"mechazyiu.accum0"}, {"mechazyiu.accum1"}};
+  Texture shadow_mask_tx_ = {"mechazyiu.shadow_mask"};
+  Framebuffer shadow_mask_fb_ = {"mechazyiu.shadow_mask"};
 
   /* Shadow maps. */
-  Texture shadow_tx_ = {"ember.shadow"};
-  Texture shadow_depth_tx_ = {"ember.shadow_depth"};
-  Framebuffer shadow_fb_ = {"ember.shadow"};
+  Texture shadow_tx_ = {"mechazyiu.shadow"};
+  Texture shadow_depth_tx_ = {"mechazyiu.shadow_depth"};
+  Framebuffer shadow_fb_ = {"mechazyiu.shadow"};
   /** Lights without shadow read this instead of the mask. */
-  Texture white_tx_ = {"ember.white"};
+  Texture white_tx_ = {"mechazyiu.white"};
   TilePlan plan_;
   int2 tile_allocated_ = int2(0);
   int64_t budget_ = 0;
@@ -289,13 +289,13 @@ class Instance : public DrawEngine {
   int cur_ = 0;
 
   /* Viewport: mean and linear depth of the whole view. */
-  Texture mean_tx_ = {"ember.mean"};
-  Texture view_depth_tx_ = {"ember.view_depth"};
-  Framebuffer mean_fb_ = {"ember.mean"};
-  Framebuffer view_depth_fb_ = {"ember.view_depth"};
-  Framebuffer output_fb_ = {"ember.output"};
+  Texture mean_tx_ = {"mechazyiu.mean"};
+  Texture view_depth_tx_ = {"mechazyiu.view_depth"};
+  Framebuffer mean_fb_ = {"mechazyiu.mean"};
+  Framebuffer view_depth_fb_ = {"mechazyiu.view_depth"};
+  Framebuffer output_fb_ = {"mechazyiu.output"};
 
-  Texture material_tx_ = {"ember.materials"};
+  Texture material_tx_ = {"mechazyiu.materials"};
 
   /* Values read by the passes when they are submitted. */
   float4 rect_ = float4(-1.0f, -1.0f, 1.0f, 1.0f);
@@ -330,7 +330,7 @@ class Instance : public DrawEngine {
  public:
   StringRefNull name_get() final
   {
-    return "Ember";
+    return "MECHAZYIU";
   }
 
   void init() final
@@ -460,7 +460,7 @@ class Instance : public DrawEngine {
   {
     return *material_passes_.lookup_or_add_cb(int3(index, textured, back), [&]() {
       const MaterialData &data = materials_[index];
-      PassMain::Sub &sub = gbuffer_ps_.sub("ember.material");
+      PassMain::Sub &sub = gbuffer_ps_.sub("mechazyiu.material");
       sub.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_DEPTH | DRW_STATE_DEPTH_LESS_EQUAL |
                     (back ? DRW_STATE_CULL_FRONT : DRW_STATE_CULL_BACK));
       sub.shader_set(ShaderCache::get().gbuffer[textured][back].get());
@@ -583,7 +583,7 @@ class Instance : public DrawEngine {
     if (!budget_known) {
       available = int64_t(96) << 20;
     }
-    /* What Ember holds already is available to it. */
+    /* What MECHAZYIU holds already is available to it. */
     available += int64_t(tile_allocated_.x) * tile_allocated_.y * tile_bytes_per_pixel;
     if (viewport) {
       if (mean_tx_.gpu_texture()) {
@@ -634,7 +634,7 @@ class Instance : public DrawEngine {
     }
     plan_ = plan;
     budget_ = available;
-    printf("Ember: %dx%d in %d tile%s of %dx%d (%d MB of video memory for them)\n",
+    printf("MECHAZYIU: %dx%d in %d tile%s of %dx%d (%d MB of video memory for them)\n",
            size.x,
            size.y,
            plan.len(),
@@ -709,7 +709,8 @@ class Instance : public DrawEngine {
     const double reference = math::max(best, 3.0e9);
     for (int i = 0; i < textures_len; i++) {
       if (rates[i] < reference * 0.5) {
-        printf("Ember: tile buffer %d writes at %.1f GB/s (system memory), shrinking the tiles\n",
+        printf("MECHAZYIU: tile buffer %d writes at %.1f GB/s (system memory), "
+               "shrinking the tiles\n",
                i,
                rates[i] * 1e-9);
         return false;
@@ -1166,7 +1167,7 @@ class Instance : public DrawEngine {
         RE_engine_update_stats(engine, nullptr, stats);
         RE_engine_update_progress(engine, (float(t) + float(s + 1) / samples_len_) / tiles_len);
       }
-      if (getenv("EMBER_DEBUG")) {
+      if (getenv("MECHAZYIU_DEBUG")) {
         debug_print(tile);
       }
       if (combined) {
@@ -1178,10 +1179,10 @@ class Instance : public DrawEngine {
     }
   }
 
-  /** `EMBER_DEBUG`: what the passes got, for a final render tile. */
+  /** `MECHAZYIU_DEBUG`: what the passes got, for a final render tile. */
   void debug_print(int4 tile)
   {
-    printf("Ember debug: world %f %f %f, background %f %f %f, %d lights, %d materials\n",
+    printf("MECHAZYIU debug: world %f %f %f, background %f %f %f, %d lights, %d materials\n",
            world_.sh0.x,
            world_.sh0.y,
            world_.sh0.z,
@@ -1257,13 +1258,13 @@ void Engine::free_static()
   ShaderCache::release();
 }
 
-}  // namespace ember
+}  // namespace mechazyiu
 
 /* -------------------------------------------------------------------- */
 /** \name Render Engine
  * \{ */
 
-static void ember_render_to_image(RenderEngine *engine, RenderLayer *layer, const rcti /*rect*/)
+static void mechazyiu_render_to_image(RenderEngine *engine, RenderLayer *layer, const rcti /*rect*/)
 {
   using namespace blender::draw;
   const DRWContext *draw_ctx = DRW_context_get();
@@ -1278,7 +1279,7 @@ static void ember_render_to_image(RenderEngine *engine, RenderLayer *layer, cons
   DRW_cache_restart();
   View::default_set(viewmat, winmat);
 
-  ember::Instance instance;
+  mechazyiu::Instance instance;
   instance.init_scene();
 
   Manager &manager = *DRW_manager_get();
@@ -1303,7 +1304,7 @@ static void ember_render_to_image(RenderEngine *engine, RenderLayer *layer, cons
   DRW_submission_end();
 }
 
-static void ember_render_update_passes(RenderEngine *engine, Scene *scene, ViewLayer *view_layer)
+static void mechazyiu_render_update_passes(RenderEngine *engine, Scene *scene, ViewLayer *view_layer)
 {
   if (view_layer->passflag & SCE_PASS_COMBINED) {
     RE_engine_register_pass(engine, scene, view_layer, RE_PASSNAME_COMBINED, 4, "RGBA", SOCK_RGBA);
@@ -1313,26 +1314,26 @@ static void ember_render_update_passes(RenderEngine *engine, Scene *scene, ViewL
   }
 }
 
-static void ember_render(RenderEngine *engine, Depsgraph *depsgraph)
+static void mechazyiu_render(RenderEngine *engine, Depsgraph *depsgraph)
 {
-  DRW_render_to_image(engine, depsgraph, ember_render_to_image, [](RenderResult *) {});
+  DRW_render_to_image(engine, depsgraph, mechazyiu_render_to_image, [](RenderResult *) {});
 }
 
-RenderEngineType DRW_engine_viewport_ember_type = {
+RenderEngineType DRW_engine_viewport_mechazyiu_type = {
     /*next*/ nullptr,
     /*prev*/ nullptr,
-    /*idname*/ "BLENDER_EMBER",
-    /*name*/ N_("Ember"),
+    /*idname*/ "BLENDER_MECHAZYIU",
+    /*name*/ N_("MECHAZYIU"),
     /*flag*/ RE_INTERNAL | RE_USE_PREVIEW | RE_USE_GPU_CONTEXT,
     /*update*/ nullptr,
-    /*render*/ &ember_render,
+    /*render*/ &mechazyiu_render,
     /*render_frame_finish*/ nullptr,
     /*draw*/ nullptr,
     /*bake*/ nullptr,
     /*view_update*/ nullptr,
     /*view_draw*/ nullptr,
     /*update_script_node*/ nullptr,
-    /*update_render_passes*/ &ember_render_update_passes,
+    /*update_render_passes*/ &mechazyiu_render_update_passes,
     /*update_custom_camera*/ nullptr,
     /*draw_engine*/ nullptr,
     /*rna_ext*/

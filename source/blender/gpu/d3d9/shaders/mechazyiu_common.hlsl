@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
 /**
- * Shared parts of the Ember render engine shaders (`draw/engines/ember`).
+ * Shared parts of the MECHAZYIU render engine shaders (`draw/engines/mechazyiu`).
  *
  * G-buffer (all 32 bit per pixel, a requirement of multiple render targets on R300):
  * - 0 (RGBA8): sqrt(diffuse color), roughness (at least 0.045).
@@ -18,12 +18,12 @@
 
 /* 10 bits per component: precise enough without renormalizing (one instruction to decode, the
  * light passes are at the ps_2_0 limit). */
-float3 ember_normal_decode(float3 e)
+float3 mechazyiu_normal_decode(float3 e)
 {
   return e * 2.0 - 1.0;
 }
 
-#ifdef EMBER_SCREEN_PASS
+#ifdef MECHAZYIU_SCREEN_PASS
 float4 rect;
 float4 proj;
 /* x: 1 for perspective, zw: part of the textures used (tiles smaller than their buffers). */

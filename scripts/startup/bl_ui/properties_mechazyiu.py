@@ -2,15 +2,15 @@
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-# Ember (the render engine of the Windows XP build) in the properties of the other modules:
+# MECHAZYIU (the render engine of the Windows XP build) in the properties of the other modules:
 # the panels shown for every engine (those listing both EEVEE and Workbench), and the EEVEE panels
-# of the settings Ember uses too. Ember's own panels are in `properties_render.py`.
+# of the settings MECHAZYIU uses too. MECHAZYIU's own panels are in `properties_render.py`.
 
 import bpy
 
-ENGINE = 'BLENDER_EMBER'
+ENGINE = 'BLENDER_MECHAZYIU'
 
-# EEVEE panels whose settings Ember reads.
+# EEVEE panels whose settings MECHAZYIU reads.
 EEVEE_PANELS = (
     "DATA_PT_EEVEE_light",
     "DATA_PT_EEVEE_light_distance",

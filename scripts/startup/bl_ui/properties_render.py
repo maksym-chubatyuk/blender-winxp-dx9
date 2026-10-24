@@ -784,9 +784,9 @@ class RENDER_PT_eevee_film(RenderButtonsPanel, Panel):
         sub.prop(props, "overscan_size", text="")
 
 
-class RENDER_PT_ember_sampling(RenderButtonsPanel, Panel):
+class RENDER_PT_mechazyiu_sampling(RenderButtonsPanel, Panel):
     bl_label = "Sampling"
-    COMPAT_ENGINES = {'BLENDER_EMBER'}
+    COMPAT_ENGINES = {'BLENDER_MECHAZYIU'}
 
     @classmethod
     def poll(cls, context):
@@ -807,10 +807,10 @@ class RENDER_PT_ember_sampling(RenderButtonsPanel, Panel):
         col.prop(props, "light_threshold")
 
 
-class RENDER_PT_ember_film(RenderButtonsPanel, Panel):
+class RENDER_PT_mechazyiu_film(RenderButtonsPanel, Panel):
     bl_label = "Film"
     bl_options = {'DEFAULT_CLOSED'}
-    COMPAT_ENGINES = {'BLENDER_EMBER'}
+    COMPAT_ENGINES = {'BLENDER_MECHAZYIU'}
 
     @classmethod
     def poll(cls, context):
@@ -1226,7 +1226,7 @@ class RENDER_PT_hydra_debug(RenderButtonsPanel, Panel):
 
 classes = (
     RENDER_PT_context,
-    RENDER_PT_ember_sampling,
+    RENDER_PT_mechazyiu_sampling,
     RENDER_PT_eevee_sampling,
     RENDER_PT_eevee_sampling_viewport,
     RENDER_PT_eevee_sampling_render,
@@ -1253,7 +1253,7 @@ classes = (
     RENDER_PT_eevee_motion_blur,
     RENDER_PT_eevee_motion_blur_curve,
     RENDER_PT_eevee_film,
-    RENDER_PT_ember_film,
+    RENDER_PT_mechazyiu_film,
     RENDER_PT_eevee_performance,
     RENDER_PT_eevee_performance_memory,
     RENDER_PT_eevee_performance_viewport,

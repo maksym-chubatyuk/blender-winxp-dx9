@@ -5,7 +5,7 @@
 /** \file
  * \ingroup draw_engine
  *
- * Ember: render engine for Shader Model 2.0 GPUs (the Direct3D 9 backend).
+ * MECHAZYIU: render engine for Shader Model 2.0 GPUs (the Direct3D 9 backend).
  *
  * Deferred shading, one pass per light, and many jittered samples averaged together: the
  * samples give the anti-aliasing and integrate the light shapes (area and soft lights). Each
@@ -35,7 +35,7 @@ namespace gpu {
 class Texture;
 }
 
-namespace ember {
+namespace mechazyiu {
 
 /* -------------------------------------------------------------------- */
 /** \name Materials
@@ -124,5 +124,5 @@ float halton(int index, int base);
 
 /** \} */
 
-}  // namespace ember
+}  // namespace mechazyiu
 }  // namespace blender

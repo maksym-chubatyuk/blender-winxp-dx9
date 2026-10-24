@@ -95,7 +95,7 @@
 
 #include "engines/compositor/compositor_engine.h"
 #include "engines/eevee/eevee_engine.h"
-#include "engines/ember/ember_engine.h"
+#include "engines/mechazyiu/mechazyiu_engine.h"
 #include "engines/external/external_engine.h"
 #include "engines/gpencil/gpencil_engine.hh"
 #include "engines/image/image_engine.h"
@@ -1196,13 +1196,13 @@ void DRWContext::enable_engines(bool gpencil_engine_needed, RenderEngineType *re
         view_data.workbench.set_used(true);
         break;
       case OB_MATERIAL:
-        /* XP port: Ember does the material preview (of every engine) instead of EEVEE. */
-        view_data.ember.set_used(true);
+        /* XP port: MECHAZYIU does the material preview (of every engine) instead of EEVEE. */
+        view_data.mechazyiu.set_used(true);
         break;
       case OB_RENDER:
       default:
-        if (render_engine_type == &DRW_engine_viewport_ember_type) {
-          view_data.ember.set_used(true);
+        if (render_engine_type == &DRW_engine_viewport_mechazyiu_type) {
+          view_data.mechazyiu.set_used(true);
         }
         else if (render_engine_type == &DRW_engine_viewport_eevee_type) {
           view_data.eevee.set_used(true);
@@ -2291,15 +2291,15 @@ bool DRWContext::is_viewport_compositor_enabled() const
 
 void DRW_engines_register()
 {
-  /* XP port: no EEVEE, it needs newer GPUs than Direct3D 9 ones. Ember replaces it. */
-  RE_engines_register(&DRW_engine_viewport_ember_type);
+  /* XP port: no EEVEE, it needs newer GPUs than Direct3D 9 ones. MECHAZYIU replaces it. */
+  RE_engines_register(&DRW_engine_viewport_mechazyiu_type);
   RE_engines_register(&DRW_engine_viewport_workbench_type);
 }
 
 void DRW_engines_free()
 {
   eevee::Engine::free_static();
-  ember::Engine::free_static();
+  mechazyiu::Engine::free_static();
   workbench::Engine::free_static();
   draw::gpencil::Engine::free_static();
   image_engine::Engine::free_static();

@@ -126,9 +126,9 @@ bool object_eevee_shader_nodes_poll(const bContext *C)
     return false;
   }
   const RenderEngineType *engine_type = CTX_data_engine_type(C);
-  /* XP port: Ember replaces EEVEE. */
+  /* XP port: MECHAZYIU replaces EEVEE. */
   return STREQ(engine_type->idname, "BLENDER_EEVEE") ||
-         STREQ(engine_type->idname, "BLENDER_EMBER");
+         STREQ(engine_type->idname, "BLENDER_MECHAZYIU");
 }
 
 /* ****** */

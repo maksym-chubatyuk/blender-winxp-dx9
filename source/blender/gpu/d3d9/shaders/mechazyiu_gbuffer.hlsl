@@ -3,13 +3,13 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
 /**
- * Ember surfaces into the G-buffer (`ember_gbuffer`, see `ember_common.hlsl`). Defines: TEXTURE
+ * MECHAZYIU surfaces into the G-buffer (`mechazyiu_gbuffer`, see `mechazyiu_common.hlsl`). Defines: TEXTURE
  * (the base color multiplies an image texture), FLIP (back faces: flipped normals).
  */
 
 #include "d3d9_common.hlsl"
 #include "draw_common.hlsl"
-#include "ember_common.hlsl"
+#include "mechazyiu_common.hlsl"
 
 // d3d9-resource-id 11 1
 float4 view_buf[12];
