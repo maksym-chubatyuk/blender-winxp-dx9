@@ -36,6 +36,7 @@
 #include "BKE_attribute.hh"
 #include "BKE_report.hh"
 #include "BKE_editmesh.hh"
+#include "BKE_idprop.hh"
 #include "BKE_material.hh"
 #include "BKE_mesh.hh"
 #include "BKE_mesh_types.hh"
@@ -113,6 +114,7 @@ class ShaderCache {
       {{{"mechazyiu_gbuffer_maps"}, {"mechazyiu_gbuffer_maps_single"}},
        {{"mechazyiu_gbuffer_maps_flip"}, {"mechazyiu_gbuffer_maps_flip_single"}}}};
   gpu::StaticShader base = {"mechazyiu_base"};
+  gpu::StaticShader ao[2 /*ortho*/] = {{"mechazyiu_ao"}, {"mechazyiu_ao_ortho"}};
   gpu::StaticShader light[2 /*blend*/][light_type_len] = {
       {{"mechazyiu_light_point"},
        {"mechazyiu_light_spot"},
@@ -354,6 +356,14 @@ class Instance : public DrawEngine {
   float filter_size_ = 1.5f;
   float light_threshold_ = 0.01f;
   bool transparent_ = false;
+  /** Ambient occlusion (`Scene.mechazyiu`, a Python property group), distance 0: none. */
+  float ao_distance_ = 0.0f;
+  float ao_factor_ = 1.0f;
+  float4 ao_params_ = float4(0.0f);
+  float4 ao_taps_[2] = {};
+  float4 ao_uv_to_view_ = float4(0.0f);
+  /** The ambient occlusion of the sample, or white. */
+  gpu::Texture *ao_src_ = nullptr;
   /** Depth of field by moving the camera over its aperture (radius 0: none). */
   struct {
     float radius = 0.0f;
@@ -375,6 +385,7 @@ class Instance : public DrawEngine {
   /* Passes. */
   PassMain gbuffer_ps_ = {"mechazyiu.gbuffer"};
   PassSimple base_ps_ = {"mechazyiu.base"};
+  PassSimple ao_ps_[2 /*ortho*/] = {{"mechazyiu.ao"}, {"mechazyiu.ao_ortho"}};
   PassSimple light_ps_[light_type_len] = {{"mechazyiu.light_point"},
                                            {"mechazyiu.light_spot"},
                                            {"mechazyiu.light_sun"},
@@ -538,6 +549,61 @@ class Instance : public DrawEngine {
                                 world_lighting_studio_get(*v3d);
     world_texture_ensure();
     dof_init();
+    settings_read();
+  }
+
+  /** MECHAZYIU's settings of the scene: `Scene.mechazyiu` (defined in `properties_mechazyiu.py`). */
+  void settings_read()
+  {
+    const IDProperty *group = scene_->id.system_properties ?
+                                  IDP_GetPropertyTypeFromGroup(
+                                      scene_->id.system_properties, "mechazyiu", IDP_GROUP) :
+                                  nullptr;
+    auto value = [&](const char *name, float fallback) {
+      const IDProperty *prop = group ? IDP_GetPropertyFromGroup(group, name) : nullptr;
+      if (prop == nullptr) {
+        return fallback;
+      }
+      switch (prop->type) {
+        case IDP_BOOLEAN:
+          return IDP_bool_get(prop) ? 1.0f : 0.0f;
+        case IDP_INT:
+          return float(IDP_int_get(prop));
+        default:
+          return IDP_coerce_to_float_or_zero(prop);
+      }
+    };
+    /* The defaults of the property group. */
+    const bool use_ao = value("use_ambient_occlusion", 1.0f) != 0.0f;
+    ao_distance_ = use_ao ? math::max(value("ambient_occlusion_distance", 0.2f), 0.0f) : 0.0f;
+    ao_factor_ = value("ambient_occlusion_factor", 1.0f);
+  }
+
+  /**
+   * The 4 points of the ambient occlusion of a sample: turned and at other distances every sample
+   * (the same for all pixels), so that the samples cover the disk around the pixels. Needs
+   * `proj_` and `proj_type_`.
+   */
+  void ao_setup(int sample)
+  {
+    /* Texture coordinates to view space: the view rays are linear in normalized device
+     * coordinates, uv = (ndc * 0.5 + 0.5) * proj_type.zw. */
+    const float2 uv_to_view = 2.0f * float2(proj_.x, proj_.y) / float2(proj_type_.z, proj_type_.w);
+    ao_uv_to_view_ = float4(uv_to_view, 0.0f, 0.0f);
+    /* Twice the mean of the 4 points: surrounded pixels (half of the points below the surface)
+     * are fully occluded. */
+    ao_params_ = float4(
+        1.0f / math::square(ao_distance_), math::max(ao_factor_, 0.0f) / 2.0f, 0.0f, 0.0f);
+    const float angle = halton(sample, 23) * 2.0f * float(M_PI);
+    const float shift = halton(sample, 29);
+    float2 taps[4];
+    for (int i = 0; i < 4; i++) {
+      const float a = angle + float(i) * float(M_PI_2);
+      const float radius = (float(i) + shift) / 4.0f * ao_distance_;
+      taps[i] = float2(math::cos(a), math::sin(a)) * radius / uv_to_view;
+    }
+    ao_taps_[0] = float4(taps[0], taps[1]);
+    ao_taps_[1] = float4(taps[2], taps[3]);
   }
 
   /** The camera's depth of field, like EEVEE's (renders, and the viewport through the camera). */
@@ -661,7 +727,18 @@ class Instance : public DrawEngine {
       ps.bind_texture("gb_specular_tx", &gb_specular_tx_);
     };
 
+    for (int ortho = 0; ortho < 2; ortho++) {
+      PassSimple &ps = ao_ps_[ortho];
+      screen_pass(ps, shaders.ao[ortho].get());
+      gbuffer_read(ps);
+      ps.push_constant("ao_params", &ao_params_);
+      ps.push_constant("ao_taps", ao_taps_, 2);
+      ps.push_constant("ao_uv_to_view", &ao_uv_to_view_);
+      ps.draw_procedural(GPU_PRIM_TRIS, 1, 6);
+    }
+
     screen_pass(base_ps_, shaders.base.get());
+    base_ps_.bind_texture("ao_tx", &ao_src_);
     gbuffer_read(base_ps_);
     base_ps_.bind_texture("material_tx", &material_tx_);
     {
@@ -1383,6 +1460,16 @@ class Instance : public DrawEngine {
       GPU_framebuffer_bind(fb);
       GPU_framebuffer_viewport_set(fb, 0, 0, tile.z, tile.w);
     };
+
+    /* Ambient occlusion, into the buffer of the shadow masks (they come later). */
+    rect_ = float4(-1.0f, -1.0f, 1.0f, 1.0f);
+    ao_src_ = white_tx_;
+    if (ao_distance_ > 0.0f) {
+      ao_setup(sample);
+      bind(shadow_mask_fb_);
+      manager.submit(ao_ps_[proj_type_.x > 0.5f ? 0 : 1]);
+      ao_src_ = shadow_mask_tx_;
+    }
 
     /* World, emission, background. */
     rect_ = float4(-1.0f, -1.0f, 1.0f, 1.0f);

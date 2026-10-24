@@ -243,9 +243,28 @@ SAMPLER(4, sampler2D, accum_tx)
 ADDITIONAL_INFO(mechazyiu_screen_common)
 GPU_SHADER_CREATE_END()
 
+/* Ambient occlusion of a sample (1: none), before the base pass. */
+GPU_SHADER_CREATE_INFO(mechazyiu_ao)
+/* x: 1 / distance^2, y: factor / 2. */
+PUSH_CONSTANT(float4, ao_params)
+/* Offsets of the 4 points in texture coordinates, divided by the depth in perspective. */
+PUSH_CONSTANT_ARRAY(float4, ao_taps, 2)
+/* View space offset per texture coordinate offset (xy), at depth 1 in perspective. */
+PUSH_CONSTANT(float4, ao_uv_to_view)
+ADDITIONAL_INFO(mechazyiu_gbuffer_read)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_ao_ortho)
+ADDITIONAL_INFO(mechazyiu_ao)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
 /* First pass of a sample: world light, emission and the background. */
 GPU_SHADER_CREATE_INFO(mechazyiu_base)
 SAMPLER(5, sampler2D, material_tx)
+/* Ambient occlusion (red), multiplies the world lighting. */
+SAMPLER(10, sampler2D, ao_tx)
 /* The environment, RGBM encoded: as reflected by roughness 0, 1/3 and 2/3 (blurred), and its
  * irradiance / pi (diffuse lighting, roughness 1). */
 SAMPLER(6, samplerCube, world_tx)

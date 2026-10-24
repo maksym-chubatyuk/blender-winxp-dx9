@@ -7,6 +7,11 @@
 # of the settings MECHAZYIU uses too. MECHAZYIU's own panels are in `properties_render.py`.
 
 import bpy
+from bpy.props import (
+    BoolProperty,
+    FloatProperty,
+    PointerProperty,
+)
 
 ENGINE = 'BLENDER_MECHAZYIU'
 
@@ -29,7 +34,36 @@ def _subclasses(cls):
         yield from _subclasses(sub)
 
 
+class MechazyiuSceneSettings(bpy.types.PropertyGroup):
+    """MECHAZYIU's settings of a scene (``Scene.mechazyiu``, read by the engine)."""
+
+    use_ambient_occlusion: BoolProperty(
+        name="Ambient Occlusion",
+        description="Darken the world lighting where nearby surfaces block it",
+        default=True,
+    )
+    ambient_occlusion_distance: FloatProperty(
+        name="Distance",
+        description="Distance of the surfaces that occlude",
+        default=0.2,
+        min=0.0,
+        soft_max=10.0,
+        subtype='DISTANCE',
+    )
+    ambient_occlusion_factor: FloatProperty(
+        name="Factor",
+        description="Strength of the occlusion",
+        default=1.0,
+        min=0.0,
+        soft_max=2.0,
+        subtype='FACTOR',
+    )
+
+
 def register():
+    bpy.utils.register_class(MechazyiuSceneSettings)
+    bpy.types.Scene.mechazyiu = PointerProperty(type=MechazyiuSceneSettings)
+
     for base in (bpy.types.Panel, bpy.types.Menu, bpy.types.UIList):
         for cls in _subclasses(base):
             engines = getattr(cls, "COMPAT_ENGINES", None)

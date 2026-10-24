@@ -807,6 +807,31 @@ class RENDER_PT_mechazyiu_sampling(RenderButtonsPanel, Panel):
         col.prop(props, "light_threshold")
 
 
+class RENDER_PT_mechazyiu_ambient_occlusion(RenderButtonsPanel, Panel):
+    bl_label = "Ambient Occlusion"
+    bl_options = {'DEFAULT_CLOSED'}
+    COMPAT_ENGINES = {'BLENDER_MECHAZYIU'}
+
+    @classmethod
+    def poll(cls, context):
+        return (context.engine in cls.COMPAT_ENGINES)
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.mechazyiu, "use_ambient_occlusion", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+
+        props = context.scene.mechazyiu
+        layout.active = props.use_ambient_occlusion
+
+        col = layout.column()
+        col.prop(props, "ambient_occlusion_distance")
+        col.prop(props, "ambient_occlusion_factor")
+
+
 class RENDER_PT_mechazyiu_film(RenderButtonsPanel, Panel):
     bl_label = "Film"
     bl_options = {'DEFAULT_CLOSED'}
@@ -1227,6 +1252,7 @@ class RENDER_PT_hydra_debug(RenderButtonsPanel, Panel):
 classes = (
     RENDER_PT_context,
     RENDER_PT_mechazyiu_sampling,
+    RENDER_PT_mechazyiu_ambient_occlusion,
     RENDER_PT_eevee_sampling,
     RENDER_PT_eevee_sampling_viewport,
     RENDER_PT_eevee_sampling_render,

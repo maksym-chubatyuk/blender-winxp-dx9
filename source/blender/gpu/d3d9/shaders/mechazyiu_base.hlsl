@@ -20,6 +20,7 @@ samplerCUBE world_tx : register(s6);
 samplerCUBE world_glossy_tx : register(s7);
 samplerCUBE world_rough_tx : register(s8);
 samplerCUBE irradiance_tx : register(s9);
+sampler2D ao_tx : register(s10);
 
 float4 world_rotation[3];
 float4 world_params;
@@ -71,6 +72,7 @@ float4 frag(VertOut v) : COLOR0
                 rgbm(texCUBE(irradiance_tx, dir)) * w.w) *
                world_params.x;
   float3 irradiance = rgbm(texCUBE(irradiance_tx, n)) * world_params.x;
-  float3 color = gd.rgb * gd.rgb * irradiance + spec * env + emission;
+  float ao = tex2D(ao_tx, v.uv).r;
+  float3 color = (gd.rgb * gd.rgb * irradiance + spec * env) * ao + emission;
   return surface ? float4(color, 1.0) : float4(env, 1.0) * world_params.w;
 }
