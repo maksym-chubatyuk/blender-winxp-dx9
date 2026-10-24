@@ -115,6 +115,7 @@ class ShaderCache {
        {{"mechazyiu_gbuffer_maps_flip"}, {"mechazyiu_gbuffer_maps_flip_single"}}}};
   gpu::StaticShader base = {"mechazyiu_base"};
   gpu::StaticShader ao[2 /*ortho*/] = {{"mechazyiu_ao"}, {"mechazyiu_ao_ortho"}};
+  gpu::StaticShader bounce = {"mechazyiu_bounce"};
   gpu::StaticShader light[2 /*blend*/][light_type_len] = {
       {{"mechazyiu_light_point"},
        {"mechazyiu_light_spot"},
@@ -359,6 +360,10 @@ class Instance : public DrawEngine {
   /** Ambient occlusion (`Scene.mechazyiu`, a Python property group), distance 0: none. */
   float ao_distance_ = 0.0f;
   float ao_factor_ = 1.0f;
+  bool use_bounce_ = true;
+  float4 mean_uv_transform_ = float4(1.0f, 1.0f, 0.0f, 0.0f);
+  /** No occlusion nor bounce light. */
+  Texture no_ao_tx_ = {"mechazyiu.no_ao"};
   float4 ao_params_ = float4(0.0f);
   float4 ao_taps_[2] = {};
   float4 ao_uv_to_view_ = float4(0.0f);
@@ -370,7 +375,7 @@ class Instance : public DrawEngine {
   bool draft_ = false;
   /** View pixels per pixel of the sample (drafts are rendered at half the resolution). */
   int draft_scale_ = 1;
-  /** The ambient occlusion of the sample, or white. */
+  /** The ambient occlusion and bounce light of the sample, or `no_ao_tx_`. */
   gpu::Texture *ao_src_ = nullptr;
   /** Depth of field by moving the camera over its aperture (radius 0: none). */
   struct {
@@ -394,6 +399,7 @@ class Instance : public DrawEngine {
   PassMain gbuffer_ps_ = {"mechazyiu.gbuffer"};
   PassSimple base_ps_ = {"mechazyiu.base"};
   PassSimple ao_ps_[2 /*ortho*/] = {{"mechazyiu.ao"}, {"mechazyiu.ao_ortho"}};
+  PassSimple bounce_ps_ = {"mechazyiu.bounce"};
   PassSimple light_ps_[light_type_len] = {{"mechazyiu.light_point"},
                                            {"mechazyiu.light_spot"},
                                            {"mechazyiu.light_sun"},
@@ -585,6 +591,7 @@ class Instance : public DrawEngine {
     const bool use_ao = value("use_ambient_occlusion", 1.0f) != 0.0f;
     ao_distance_ = use_ao ? math::max(value("ambient_occlusion_distance", 0.2f), 0.0f) : 0.0f;
     ao_factor_ = value("ambient_occlusion_factor", 1.0f);
+    use_bounce_ = value("use_bounce_light", 1.0f) != 0.0f;
   }
 
   /**
@@ -600,8 +607,11 @@ class Instance : public DrawEngine {
     ao_uv_to_view_ = float4(uv_to_view, 0.0f, 0.0f);
     /* Twice the mean of the 4 points: surrounded pixels (half of the points below the surface)
      * are fully occluded. */
-    ao_params_ = float4(
-        1.0f / math::square(ao_distance_), math::max(ao_factor_, 0.0f) / 2.0f, 0.0f, 0.0f);
+    const float factor = math::max(ao_factor_, 0.0f) / 2.0f;
+    ao_params_ = float4(1.0f / math::square(ao_distance_),
+                        factor,
+                        use_bounce_ ? factor : 0.0f,
+                        proj_type_.x > 0.5f ? 1.0f : 0.0f);
     const float angle = halton(sample, 23) * 2.0f * float(M_PI);
     const float shift = halton(sample, 29);
     float2 taps[4];
@@ -770,6 +780,14 @@ class Instance : public DrawEngine {
       ps.push_constant("ao_uv_to_view", &ao_uv_to_view_);
       ps.draw_procedural(GPU_PRIM_TRIS, 1, 6);
     }
+    screen_pass(bounce_ps_, shaders.bounce.get());
+    gbuffer_read(bounce_ps_);
+    bounce_ps_.push_constant("ao_params", &ao_params_);
+    bounce_ps_.push_constant("ao_taps", ao_taps_, 2);
+    bounce_ps_.push_constant("mean_uv_transform", &mean_uv_transform_);
+    bounce_ps_.bind_texture("weights_tx", &shadow_mask_tx_);
+    bounce_ps_.bind_texture("mean_tx", &mean_src_);
+    bounce_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 6);
 
     screen_pass(base_ps_, shaders.base.get());
     base_ps_.bind_texture("ao_tx", &ao_src_);
@@ -1166,6 +1184,11 @@ class Instance : public DrawEngine {
                           GPU_TEXTURE_USAGE_SHADER_READ,
                           white);
     }
+    if (no_ao_tx_.gpu_texture() == nullptr) {
+      const float4 none(0.0f, 0.0f, 0.0f, 1.0f);
+      no_ao_tx_.ensure_2d(
+          gpu::TextureFormat::UNORM_8_8_8_8, int2(1), GPU_TEXTURE_USAGE_SHADER_READ, none);
+    }
   }
 
   /* ------------------------------------------------------------------ */
@@ -1495,14 +1518,29 @@ class Instance : public DrawEngine {
       GPU_framebuffer_viewport_set(fb, 0, 0, tile.z, tile.w);
     };
 
-    /* Ambient occlusion, into the buffer of the shadow masks (they come later). */
+    /* Ambient occlusion: the weights of its points into the buffer of the shadow masks (they come
+     * later), then the occlusion and bounce light into the other half of the sample buffers (free
+     * until the mix). */
     rect_ = float4(-1.0f, -1.0f, 1.0f, 1.0f);
-    ao_src_ = white_tx_;
+    ao_src_ = no_ao_tx_;
     if (ao_distance_ > 0.0f && !draft_) {
       ao_setup(sample);
       bind(shadow_mask_fb_);
       manager.submit(ao_ps_[proj_type_.x > 0.5f ? 0 : 1]);
-      ao_src_ = shadow_mask_tx_;
+      /* The mean of the previous samples, in the G-buffer's texture coordinates. */
+      const float2 tile_size(tile_allocated_);
+      if (viewport) {
+        mean_src_ = mean_tx_;
+        const float2 view_size(GPU_texture_width(mean_tx_), GPU_texture_height(mean_tx_));
+        mean_uv_transform_ = float4(tile_size / view_size, float2(tile.x, tile.y) / view_size);
+      }
+      else {
+        mean_src_ = tile_mean_tx_;
+        mean_uv_transform_ = float4(1.0f, 1.0f, 0.0f, 0.0f);
+      }
+      bind(accum_fb_[1 - cur_]);
+      manager.submit(bounce_ps_);
+      ao_src_ = accum_tx_[1 - cur_];
     }
 
     /* World, emission, background. */

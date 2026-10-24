@@ -72,7 +72,8 @@ float4 frag(VertOut v) : COLOR0
                 rgbm(texCUBE(irradiance_tx, dir)) * w.w) *
                world_params.x;
   float3 irradiance = rgbm(texCUBE(irradiance_tx, n)) * world_params.x;
-  float ao = tex2D(ao_tx, v.uv).r;
-  float3 color = (gd.rgb * gd.rgb * irradiance + spec * env) * ao + emission;
+  /* Ambient occlusion (a) and bounce light (rgb). */
+  float4 ao = tex2D(ao_tx, v.uv);
+  float3 color = gd.rgb * gd.rgb * (irradiance * ao.a + ao.rgb) + spec * env * ao.a + emission;
   return surface ? float4(color, 1.0) : float4(env, 1.0) * world_params.w;
 }

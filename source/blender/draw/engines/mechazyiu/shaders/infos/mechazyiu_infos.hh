@@ -243,9 +243,9 @@ SAMPLER(4, sampler2D, accum_tx)
 ADDITIONAL_INFO(mechazyiu_screen_common)
 GPU_SHADER_CREATE_END()
 
-/* Ambient occlusion of a sample (1: none), before the base pass. */
+/* Ambient occlusion: weights of the 4 points around the pixels (rgba), before the base pass. */
 GPU_SHADER_CREATE_INFO(mechazyiu_ao)
-/* x: 1 / distance^2, y: factor / 2. */
+/* x: 1 / distance^2, y: factor / 2, z: bounce light factor, w: 1 for perspective. */
 PUSH_CONSTANT(float4, ao_params)
 /* Offsets of the 4 points in texture coordinates, divided by the depth in perspective. */
 PUSH_CONSTANT_ARRAY(float4, ao_taps, 2)
@@ -260,10 +260,21 @@ ADDITIONAL_INFO(mechazyiu_ao)
 DO_STATIC_COMPILATION()
 GPU_SHADER_CREATE_END()
 
+/* From the weights: the occlusion (a) and the bounce light (rgb, from the mean of the previous
+ * samples). */
+GPU_SHADER_CREATE_INFO(mechazyiu_bounce)
+SAMPLER(5, sampler2D, weights_tx)
+SAMPLER(6, sampler2D, mean_tx)
+/* Texture coordinates of `mean_tx` from the G-buffer's (xy scale, zw offset). */
+PUSH_CONSTANT(float4, mean_uv_transform)
+ADDITIONAL_INFO(mechazyiu_ao)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
 /* First pass of a sample: world light, emission and the background. */
 GPU_SHADER_CREATE_INFO(mechazyiu_base)
 SAMPLER(5, sampler2D, material_tx)
-/* Ambient occlusion (red), multiplies the world lighting. */
+/* Bounce light (rgb, irradiance / pi) and ambient occlusion (a, multiplies the world lighting). */
 SAMPLER(10, sampler2D, ao_tx)
 /* The environment, RGBM encoded: as reflected by roughness 0, 1/3 and 2/3 (blurred), and its
  * irradiance / pi (diffuse lighting, roughness 1). */

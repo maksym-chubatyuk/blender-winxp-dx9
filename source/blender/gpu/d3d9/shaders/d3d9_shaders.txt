@@ -135,6 +135,7 @@ mechazyiu_alpha_prepass                            mechazyiu_gbuffer.hlsl ALPHA_
 mechazyiu_base                                     mechazyiu_base.hlsl
 mechazyiu_ao                                       mechazyiu_ao.hlsl
 mechazyiu_ao_ortho                                 mechazyiu_ao.hlsl ORTHO
+mechazyiu_bounce                                   mechazyiu_ao.hlsl BOUNCE
 mechazyiu_light_point                              mechazyiu_light.hlsl
 mechazyiu_light_spot                               mechazyiu_light.hlsl SPOT
 mechazyiu_light_sun                                mechazyiu_light.hlsl SUN

@@ -830,6 +830,7 @@ class RENDER_PT_mechazyiu_ambient_occlusion(RenderButtonsPanel, Panel):
         col = layout.column()
         col.prop(props, "ambient_occlusion_distance")
         col.prop(props, "ambient_occlusion_factor")
+        col.prop(props, "use_bounce_light")
 
 
 class RENDER_PT_mechazyiu_film(RenderButtonsPanel, Panel):

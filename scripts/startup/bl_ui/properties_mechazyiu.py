@@ -50,6 +50,12 @@ class MechazyiuSceneSettings(bpy.types.PropertyGroup):
         soft_max=10.0,
         subtype='DISTANCE',
     )
+    use_bounce_light: BoolProperty(
+        name="Bounce Light",
+        description="Light the occluded parts with the light of the surfaces occluding them "
+        "(one more bounce every sample)",
+        default=True,
+    )
     ambient_occlusion_factor: FloatProperty(
         name="Factor",
         description="Strength of the occlusion",
