@@ -183,6 +183,14 @@ struct WorldLighting {
   float rotation_z = 0.0f;
   /** The environment turns with the view (studio lights not in world space). */
   bool view_space = false;
+  /**
+   * The sun extracted from the environment (like EEVEE, its brightest part): irradiance (0: none)
+   * and direction toward it (environment space, not rotated), angle, shadow.
+   */
+  float3 sun_irradiance = float3(0.0f);
+  float3 sun_direction = float3(0.0f, 0.0f, 1.0f);
+  float sun_angle = 0.0f;
+  bool sun_shadow = true;
   /** Visibility of the environment as background (studio lights) and its blur (EEVEE's). */
   float background_opacity = 1.0f;
   float background_blur = 0.0f;
@@ -192,7 +200,7 @@ struct WorldLighting {
 std::shared_ptr<EnvironmentMaps> environment_maps_uniform(const float3 &color);
 WorldLighting world_lighting_get(const World *world);
 /** Material preview: the studio light of the viewport. */
-WorldLighting world_lighting_studio_get(const View3D &v3d);
+WorldLighting world_lighting_studio_get(const View3D &v3d, const World *scene_world);
 
 /** \} */
 

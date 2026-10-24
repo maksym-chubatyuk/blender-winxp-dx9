@@ -858,22 +858,67 @@ std::shared_ptr<EnvironmentMaps> environment_maps_uniform(const float3 &color)
  * Lighting and cubes of an environment image, kept while the image buffer is the same (they take
  * long on old CPUs).
  */
-static WorldLighting environment_lighting_get(ImBuf *ibuf, const void *source)
+/**
+ * Like EEVEE: the radiance above `threshold` (of the largest component) becomes a sun light, the
+ * image keeps the rest. Sets the sun's irradiance and direction (0: no sun).
+ */
+static void sun_extract(LinearImage &image, float threshold, WorldLighting &world)
+{
+  if (threshold <= 0.0f) {
+    return;
+  }
+  double irradiance[3] = {};
+  double3 direction(0.0);
+  for (int y = 0; y < image.height; y++) {
+    const float v = (float(y) + 0.5f) / image.height;
+    const float solid_angle = (2.0f * float(M_PI) / image.width) * (float(M_PI) / image.height) *
+                              math::cos((v - 0.5f) * float(M_PI));
+    for (int x = 0; x < image.width; x++) {
+      float3 &pixel = image.at(x, y);
+      const float brightness = math::reduce_max(pixel);
+      if (brightness <= threshold) {
+        continue;
+      }
+      const float3 sun = pixel * (1.0f - threshold / brightness);
+      pixel -= sun;
+      for (int c = 0; c < 3; c++) {
+        irradiance[c] += double(sun[c] * solid_angle);
+      }
+      direction += double3(equirect_direction((float(x) + 0.5f) / image.width, v)) *
+                   double(math::length(sun) * solid_angle);
+    }
+  }
+  if (math::length(direction) <= 0.0) {
+    return;
+  }
+  world.sun_irradiance = float3(irradiance[0], irradiance[1], irradiance[2]);
+  world.sun_direction = float3(math::normalize(direction));
+}
+
+static WorldLighting environment_lighting_get(ImBuf *ibuf,
+                                              const void *source,
+                                              const float sun_threshold)
 {
   static const void *cached_source = nullptr;
   static const ImBuf *cached_ibuf = nullptr;
   static int cached_size[2] = {0, 0};
+  static float cached_threshold = 0.0f;
   static WorldLighting cached;
   if (source != cached_source || ibuf != cached_ibuf || ibuf == nullptr ||
-      ibuf->x != cached_size[0] || ibuf->y != cached_size[1])
+      ibuf->x != cached_size[0] || ibuf->y != cached_size[1] || sun_threshold != cached_threshold)
   {
     /* 2048 wide: the largest texture of the R300, and as sharp as its cube faces. */
-    const LinearImage image = linear_image_get(ibuf, 2048);
+    LinearImage image = linear_image_get(ibuf, 2048);
     cached = WorldLighting();
     if (image.width > 0) {
+      WorldLighting sun;
+      sun_extract(image, sun_threshold, sun);
       cached = world_lighting_from_image(image.downsample(256, 128));
       cached.maps = environment_maps_build(image);
+      cached.sun_irradiance = sun.sun_irradiance;
+      cached.sun_direction = sun.sun_direction;
     }
+    cached_threshold = sun_threshold;
     cached_source = source;
     cached_ibuf = ibuf;
     cached_size[0] = ibuf ? ibuf->x : 0;
@@ -890,6 +935,7 @@ static void world_scale(WorldLighting &world, float strength)
   }
   world.background *= strength;
   world.strength *= strength;
+  world.sun_irradiance *= strength;
 }
 
 static WorldLighting world_lighting_uniform(float3 color)
@@ -927,9 +973,13 @@ WorldLighting world_lighting_get(const World *world)
       ImageUser iuser = storage->iuser;
       void *lock;
       ImBuf *ibuf = BKE_image_acquire_ibuf(image, &iuser, &lock);
-      WorldLighting result = environment_lighting_get(ibuf, image);
+      /* The threshold applies to the radiance with its strength. */
+      const float threshold = strength > 0.0f ? world->sun_threshold / strength : 0.0f;
+      WorldLighting result = environment_lighting_get(ibuf, image, threshold);
       BKE_image_release_ibuf(image, ibuf, lock);
       world_scale(result, strength);
+      result.sun_angle = world->sun_angle;
+      result.sun_shadow = (world->flag & WO_USE_SUN_SHADOW) != 0;
       /* A Mapping node turning the image around Z (it rotates the lookup direction, the
        * environment turns the other way). */
       const bNodeSocket *vector_link = input_link_get(input_find(env, "Vector"));
@@ -945,14 +995,20 @@ WorldLighting world_lighting_get(const World *world)
   return world_lighting_uniform(input_color(background, "Color", horizon) * strength);
 }
 
-WorldLighting world_lighting_studio_get(const View3D &v3d)
+WorldLighting world_lighting_studio_get(const View3D &v3d, const World *scene_world)
 {
+  /* EEVEE's look-dev world: the settings of the scene's world. */
+  const World default_world;
+  const World &settings = scene_world ? *scene_world : default_world;
   StudioLight *sl = BKE_studiolight_find(v3d.shading.lookdev_light, STUDIOLIGHT_TYPE_WORLD);
   if (sl == nullptr) {
     return world_lighting_uniform(float3(0.05f));
   }
   BKE_studiolight_ensure_flag(sl, STUDIOLIGHT_EXTERNAL_IMAGE_LOADED);
-  WorldLighting world = environment_lighting_get(sl->equirect_radiance_buffer, sl);
+  WorldLighting world = environment_lighting_get(
+      sl->equirect_radiance_buffer, sl, settings.sun_threshold);
+  world.sun_angle = settings.sun_angle;
+  world.sun_shadow = (settings.flag & WO_USE_SUN_SHADOW) != 0;
   /* Like EEVEE's look-dev world: the lookups turn by the angle. */
   world.rotation_z = -v3d.shading.studiolight_rot_z;
   world.view_space = (v3d.shading.flag & V3D_SHADING_STUDIOLIGHT_VIEW_ROTATION) != 0;

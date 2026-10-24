@@ -546,7 +546,7 @@ class Instance : public DrawEngine {
     light_threshold_ = scene_->eevee.light_threshold;
     transparent_ = use_scene_world_ && scene_->r.alphamode == R_ALPHAPREMUL;
     world_ = use_scene_world_ ? world_lighting_get(scene_->world) :
-                                world_lighting_studio_get(*v3d);
+                                world_lighting_studio_get(*v3d, scene_->world);
     world_texture_ensure();
     dof_init();
     settings_read();
@@ -681,9 +681,35 @@ class Instance : public DrawEngine {
     winmat[2].y += center.y - jitter.y;
   }
 
+  /** The sun extracted from the world, a sun light (not for environments turning with the view). */
+  void world_sun_add()
+  {
+    if (math::reduce_max(world_.sun_irradiance) <= 0.0f || world_.view_space) {
+      return;
+    }
+    /* Environment to world space: the environment's rotation around Z. */
+    const float c = math::cos(world_.rotation_z), s = math::sin(world_.rotation_z);
+    const float3 d = world_.sun_direction;
+    const float3 z = math::normalize(float3(d.x * c - d.y * s, d.x * s + d.y * c, d.z));
+    const float3 x = math::normalize(
+        math::cross(math::abs(z.z) < 0.9f ? float3(0.0f, 0.0f, 1.0f) : float3(1.0f, 0.0f, 0.0f),
+                    z));
+    LightData sun;
+    sun.type = LightType::SUN;
+    sun.object_to_world = float4x4(float4(x, 0.0f),
+                                   float4(math::cross(z, x), 0.0f),
+                                   float4(z, 0.0f),
+                                   float4(0.0f, 0.0f, 0.0f, 1.0f));
+    sun.intensity = world_.sun_irradiance;
+    sun.radius = world_.sun_angle;
+    sun.shadow = world_.sun_shadow;
+    lights_.append(sun);
+  }
+
   void begin_sync() final
   {
     lights_.clear();
+    world_sun_add();
     materials_.clear();
     material_indices_.clear();
     material_passes_.clear();
