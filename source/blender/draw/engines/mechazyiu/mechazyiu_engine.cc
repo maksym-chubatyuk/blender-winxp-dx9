@@ -362,6 +362,14 @@ class Instance : public DrawEngine {
   float4 ao_params_ = float4(0.0f);
   float4 ao_taps_[2] = {};
   float4 ao_uv_to_view_ = float4(0.0f);
+  /**
+   * The sample is a viewport draft: the first after a change (every redraw while navigating),
+   * without shadow maps nor ambient occlusion (most of the time of a sample). The next sample
+   * replaces it.
+   */
+  bool draft_ = false;
+  /** View pixels per pixel of the sample (drafts are rendered at half the resolution). */
+  int draft_scale_ = 1;
   /** The ambient occlusion of the sample, or white. */
   gpu::Texture *ao_src_ = nullptr;
   /** Depth of field by moving the camera over its aperture (radius 0: none). */
@@ -1490,7 +1498,7 @@ class Instance : public DrawEngine {
     /* Ambient occlusion, into the buffer of the shadow masks (they come later). */
     rect_ = float4(-1.0f, -1.0f, 1.0f, 1.0f);
     ao_src_ = white_tx_;
-    if (ao_distance_ > 0.0f) {
+    if (ao_distance_ > 0.0f && !draft_) {
       ao_setup(sample);
       bind(shadow_mask_fb_);
       manager.submit(ao_ps_[proj_type_.x > 0.5f ? 0 : 1]);
@@ -1565,7 +1573,7 @@ class Instance : public DrawEngine {
       light_spot_ = float4(
           1.0f / smooth, -light.spot_cos_half / smooth, light.diffuse_factor, 0.0f);
       light_mask_src_ = white_tx_;
-      if (light.shadow && shadow_render(manager, light, world_pos, viewmat, sample)) {
+      if (light.shadow && !draft_ && shadow_render(manager, light, world_pos, viewmat, sample)) {
         rect_ = rect;
         bind(shadow_mask_fb_);
         proj_type_ = float4(proj_type_.x, 0.0f, used.x, used.y);
@@ -1615,12 +1623,13 @@ class Instance : public DrawEngine {
       manager.submit(copy_ps_);
       return;
     }
-    /* The tile's part of the view, and its depth for the overlays. */
+    /* The tile's part of the view, and its depth for the overlays (drafts stretched over it). */
     proj_type_ = float4(proj_type_.x, 0.0f, 1.0f, 1.0f);
     const float2 view_size(GPU_texture_width(mean_tx_), GPU_texture_height(mean_tx_));
-    rect_ = float4(float2(tile.x, tile.y) / view_size * 2.0f - 1.0f,
-                   float2(tile.x + tile.z, tile.y + tile.w) / view_size * 2.0f - 1.0f);
-    uv_transform_ = float4(view_size / tile_size, -float2(tile.x, tile.y) / tile_size);
+    const float scale = float(draft_scale_);
+    rect_ = float4(float2(tile.x, tile.y) * scale / view_size * 2.0f - 1.0f,
+                   float2(tile.x + tile.z, tile.y + tile.w) * scale / view_size * 2.0f - 1.0f);
+    uv_transform_ = float4(view_size / (tile_size * scale), -float2(tile.x, tile.y) / tile_size);
     GPU_framebuffer_bind(mean_fb_);
     manager.submit(copy_ps_);
     copy_src_ = gb_depth_tx_;
@@ -1954,19 +1963,41 @@ class Instance : public DrawEngine {
       sample_ = 0;
     }
     while (samples_todo-- > 0 && (samples_len <= 0 || sample_ < samples_len)) {
+      draft_ = !image_render && samples_len != 1 && sample_ == 0;
       if (sample_ == 0) {
         weight_sum_ = 0.0f;
         mean_tx_.clear(float4(0.0f));
         view_depth_tx_.clear(float4(0.0f));
       }
+      else if (sample_ == 1 && !image_render && samples_len != 1) {
+        /* The first full sample replaces the draft. */
+        weight_sum_ = 0.0f;
+      }
       float weight;
       const float2 offset = sample_offset(sample_, weight);
       weight_sum_ += weight;
-      for (const int t : IndexRange(plan_.len())) {
-        const int4 tile = plan_.rect(t);
-        render_sample(
-            manager, viewmat, winmat, size, tile, sample_, offset, weight / weight_sum_, true);
+      /* Drafts at half the resolution, when the view is a single tile. */
+      const int2 draft_size = (size + 1) / 2;
+      draft_scale_ = (draft_ && plan_.len() == 1) ? 2 : 1;
+      if (draft_scale_ == 2) {
+        render_sample(manager,
+                      viewmat,
+                      winmat,
+                      draft_size,
+                      int4(0, 0, draft_size.x, draft_size.y),
+                      sample_,
+                      offset,
+                      1.0f,
+                      true);
       }
+      else {
+        for (const int t : IndexRange(plan_.len())) {
+          const int4 tile = plan_.rect(t);
+          render_sample(
+              manager, viewmat, winmat, size, tile, sample_, offset, weight / weight_sum_, true);
+        }
+      }
+      draft_scale_ = 1;
       sample_++;
     }
 
