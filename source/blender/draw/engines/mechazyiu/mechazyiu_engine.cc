@@ -43,6 +43,9 @@
 
 #include "DEG_depsgraph_query.hh"
 
+#include "BKE_camera.h"
+
+#include "DNA_camera_types.h"
 #include "DNA_light_types.h"
 #include "DNA_mesh_types.h"
 #include "DNA_scene_types.h"
@@ -351,6 +354,14 @@ class Instance : public DrawEngine {
   float filter_size_ = 1.5f;
   float light_threshold_ = 0.01f;
   bool transparent_ = false;
+  /** Depth of field by moving the camera over its aperture (radius 0: none). */
+  struct {
+    float radius = 0.0f;
+    float focus_distance = 1.0f;
+    float blades = 0.0f;
+    float rotation = 0.0f;
+    float2 scale = float2(1.0f);
+  } dof_;
   WorldLighting world_;
   Vector<LightData> lights_;
   Vector<MaterialData> materials_;
@@ -526,6 +537,82 @@ class Instance : public DrawEngine {
     world_ = use_scene_world_ ? world_lighting_get(scene_->world) :
                                 world_lighting_studio_get(*v3d);
     world_texture_ensure();
+    dof_init();
+  }
+
+  /** The camera's depth of field, like EEVEE's (renders, and the viewport through the camera). */
+  void dof_init()
+  {
+    dof_.radius = 0.0f;
+    const RegionView3D *rv3d = draw_ctx->rv3d;
+    const Object *camera_object = nullptr;
+    if (is_render_) {
+      camera_object = scene_->camera;
+    }
+    else if (draw_ctx->v3d && rv3d && rv3d->persp == RV3D_CAMOB && draw_ctx->v3d->camera) {
+      camera_object = DEG_get_evaluated(draw_ctx->depsgraph, draw_ctx->v3d->camera);
+    }
+    if (camera_object == nullptr || camera_object->type != OB_CAMERA) {
+      return;
+    }
+    const Camera &camera = *reinterpret_cast<const Camera *>(camera_object->data);
+    if ((camera.dof.flag & CAM_DOF_ENABLED) == 0 || camera.type == CAM_PANO) {
+      return;
+    }
+    float aperture = 1.0f / (2.0f * math::max(camera.dof.aperture_fstop, 1e-5f));
+    aperture *= (camera.type == CAM_ORTHO) ? 0.04f : camera.lens * 1e-3f;
+    const float ratio = camera.dof.aperture_ratio;
+    if (ratio < 1.0f) {
+      aperture /= math::max(ratio, 1e-5f);
+    }
+    dof_.radius = aperture;
+    dof_.focus_distance = BKE_camera_object_dof_distance(camera_object);
+    dof_.blades = float(camera.dof.aperture_blades);
+    dof_.rotation = camera.dof.aperture_rotation;
+    dof_.scale = float2(math::clamp(1.0f / ratio, 1e-5f, 1.0f), math::clamp(ratio, 1e-5f, 1.0f));
+  }
+
+  /**
+   * Moves the camera to a point of the aperture for a sample (the first one at the center), the
+   * projection skewed so that the focus plane stays (EEVEE's `DepthOfField::jitter_apply`).
+   */
+  void dof_jitter(int sample, float4x4 &viewmat, float4x4 &winmat) const
+  {
+    if (dof_.radius == 0.0f || sample == 0) {
+      return;
+    }
+    /* Uniform over the disk, or the polygon of the blades. */
+    float radius = math::sqrt(halton(sample, 17));
+    float theta = halton(sample, 19) * 2.0f * float(M_PI);
+    if (dof_.blades >= 3.0f) {
+      const float side_angle = 2.0f * float(M_PI) / dof_.blades;
+      auto polygon_radius = [&](float angle) {
+        return math::cos(side_angle * 0.5f) /
+               math::cos(angle - side_angle * math::floor((dof_.blades * angle + float(M_PI)) /
+                                                          (2.0f * float(M_PI))));
+      };
+      /* Even spacing along the sides. */
+      const float side = math::floor(theta / side_angle);
+      const float ratio = (theta - side * side_angle - side_angle * 0.5f) / (side_angle * 0.5f);
+      theta = side * side_angle + math::atan(ratio * math::sin(float(M_PI) / dof_.blades) /
+                                             polygon_radius(0.0f));
+      radius *= polygon_radius(theta);
+    }
+    radius *= dof_.radius;
+    theta += dof_.rotation;
+    float2 offset = float2(radius * math::cos(theta), radius * math::sin(theta)) * dof_.scale;
+
+    float3 jitter(offset, -dof_.focus_distance);
+    float3 center(0.0f, 0.0f, -dof_.focus_distance);
+    jitter = math::project_point(winmat, jitter);
+    center = math::project_point(winmat, center);
+    if (winmat[2][3] != -1.0f) {
+      offset *= dof_.focus_distance;
+    }
+    viewmat[3].x -= offset.x;
+    viewmat[3].y -= offset.y;
+    winmat[2].x += center.x - jitter.x;
+    winmat[2].y += center.y - jitter.y;
   }
 
   void begin_sync() final
@@ -1239,8 +1326,8 @@ class Instance : public DrawEngine {
    * mean (`mean_tx_`, with the depth in `view_depth_tx_`), or the tile's (final renders).
    */
   void render_sample(Manager &manager,
-                     const float4x4 &viewmat,
-                     const float4x4 &winmat,
+                     const float4x4 &camera_viewmat,
+                     const float4x4 &camera_winmat,
                      int2 size,
                      int4 tile,
                      int sample,
@@ -1248,6 +1335,8 @@ class Instance : public DrawEngine {
                      float mix,
                      bool viewport)
   {
+    float4x4 viewmat = camera_viewmat, winmat = camera_winmat;
+    dof_jitter(sample, viewmat, winmat);
     const float4x4 winmat_tile = tile_winmat(winmat, size, tile, offset);
     view_.sync(viewmat, winmat_tile);
 
