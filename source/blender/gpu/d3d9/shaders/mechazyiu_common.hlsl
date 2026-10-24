@@ -23,6 +23,36 @@ float3 mechazyiu_normal_decode(float3 e)
   return e * 2.0 - 1.0;
 }
 
+/**
+ * Dithered transparency: the value to alpha test (kept from 0.5) for a coverage `alpha`, against
+ * the interleaved gradient noise of the pixel (from its clip position), moved each sample:
+ * `alpha_params` xy: half the target size in pixels, z: pixel offset of the pattern, w: offset of
+ * the threshold.
+ */
+float mechazyiu_coverage(float alpha, float3 clip_xyw, float4 alpha_params)
+{
+  float2 pixel = clip_xyw.xy / clip_xyw.z * alpha_params.xy + alpha_params.zz * float2(1.0, 0.618);
+  float noise = frac(52.9829189 * frac(dot(pixel, float2(0.06711056, 0.00583715))) +
+                     alpha_params.w);
+  return alpha - noise + 0.5;
+}
+
+/**
+ * Shadow map distances (in [0..1]) in the 24 bits of an 8 bit color: the alpha stays free for the
+ * alpha test of the dithered casters (it has no effect on single channel float targets).
+ */
+float3 mechazyiu_distance_encode(float d)
+{
+  float3 e = frac(d * float3(1.0, 255.0, 65025.0));
+  e.xy -= e.yz * (1.0 / 255.0);
+  return e;
+}
+
+float mechazyiu_distance_decode(float3 e)
+{
+  return dot(e, float3(1.0, 1.0 / 255.0, 1.0 / 65025.0));
+}
+
 #ifdef MECHAZYIU_SCREEN_PASS
 float4 rect;
 float4 proj;

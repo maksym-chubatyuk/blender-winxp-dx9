@@ -70,6 +70,6 @@ float4 frag(VertOut v) : COLOR0
 #  endif
   float2 uv = (clip.xy * 0.5 + 0.5) * float2(0.5, 1.0) + shadow_params.xy;
 #endif
-  float occluder = tex2D(shadow_tx, uv).x;
+  float occluder = mechazyiu_distance_decode(tex2D(shadow_tx, uv).rgb);
   return (ref * shadow_bias.x - shadow_bias.y <= occluder ? 1.0 : 0.0).xxxx;
 }

@@ -77,6 +77,7 @@ void D3D9Immediate::end()
   }
   ctx->point_sprite_set(type == D3DPT_POINTLIST && d3d9_shader->point_sprite());
   ctx->flat_color_set(d3d9_shader->flat_color());
+  ctx->alpha_test_set(d3d9_shader->alpha_test());
 
   D3D9VertexLayout layout;
   layout.init(vertex_format);

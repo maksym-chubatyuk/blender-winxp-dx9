@@ -3,13 +3,17 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
 /**
- * MECHAZYIU shadow maps (`mechazyiu_shadow`, `mechazyiu_shadow_ortho` with define ORTHO): the surfaces seen
- * from a light, storing the normalized distance to it (orthographic: the depth), compared by
- * `mechazyiu_shadow_mask.hlsl`.
+ * MECHAZYIU shadow maps (`mechazyiu_shadow`, `mechazyiu_shadow_ortho` with define ORTHO): the
+ * surfaces seen from a light, storing the normalized distance to it (orthographic: the depth) in
+ * 24 bits (`mechazyiu_distance_encode`), compared by `mechazyiu_shadow_mask.hlsl`.
+ *
+ * ALPHA: dithered transparent surfaces, alpha tested against noise like their G-buffer prepass
+ * (partial shadows over the samples), TEXTURE: the coverage comes from an image.
  */
 
 #include "d3d9_common.hlsl"
 #include "draw_common.hlsl"
+#include "mechazyiu_common.hlsl"
 
 // d3d9-resource-id 11 1
 float4 view_buf[12];
@@ -17,8 +21,22 @@ float4 view_buf[12];
 /* xyz: light position (world space), w: 1 / far distance. */
 float4 shadow_light;
 
+#ifdef ALPHA
+// d3d9-alpha-test
+float4 mat_base;
+/* w: 1 when the alpha of the texture is the coverage. */
+float4 mat_params;
+float4 alpha_params;
+#  ifdef TEXTURE
+sampler2D base_tx : register(s0);
+#  endif
+#endif
+
 struct VertIn {
   float3 pos : TEXCOORD0;
+#if defined(ALPHA) && defined(TEXTURE)
+  float2 au : TEXCOORD2;
+#endif
 };
 
 struct VertOut {
@@ -28,18 +46,31 @@ struct VertOut {
 #else
   float3 to_light : TEXCOORD0;
 #endif
+#ifdef ALPHA
+  float3 clip_xyw : TEXCOORD1;
+#  ifdef TEXTURE
+  float2 uv : TEXCOORD2;
+#  endif
+#endif
 };
 
 VertOut vert(VertIn v)
 {
   VertOut o;
   float3 world_pos = drw_point_object_to_world(v.pos);
-  float4 clip = drw_mat_mul(view_buf, DRW_WINMAT, drw_mat_mul(view_buf, DRW_VIEWMAT, float4(world_pos, 1.0)));
+  float4 clip = drw_mat_mul(
+      view_buf, DRW_WINMAT, drw_mat_mul(view_buf, DRW_VIEWMAT, float4(world_pos, 1.0)));
   o.position = gpu_position(clip);
 #ifdef ORTHO
   o.depth = clip.z * 0.5 + 0.5;
 #else
   o.to_light = (world_pos - shadow_light.xyz) * shadow_light.w;
+#endif
+#ifdef ALPHA
+  o.clip_xyw = clip.xyw;
+#  ifdef TEXTURE
+  o.uv = v.au;
+#  endif
 #endif
   return o;
 }
@@ -47,8 +78,16 @@ VertOut vert(VertIn v)
 float4 frag(VertOut v) : COLOR0
 {
 #ifdef ORTHO
-  return v.depth.xxxx;
+  float4 result = float4(mechazyiu_distance_encode(v.depth), 1.0);
 #else
-  return length(v.to_light).xxxx;
+  float4 result = float4(mechazyiu_distance_encode(length(v.to_light)), 1.0);
 #endif
+#ifdef ALPHA
+  float alpha = mat_base.a;
+#  ifdef TEXTURE
+  alpha *= lerp(1.0, tex2D(base_tx, v.uv).a, mat_params.w);
+#  endif
+  result.a = mechazyiu_coverage(alpha, v.clip_xyw, alpha_params);
+#endif
+  return result;
 }

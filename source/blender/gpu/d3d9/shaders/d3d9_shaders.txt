@@ -126,6 +126,8 @@ mechazyiu_gbuffer_single                           mechazyiu_gbuffer.hlsl SINGLE
 mechazyiu_gbuffer_flip_single                      mechazyiu_gbuffer.hlsl FLIP SINGLE
 mechazyiu_gbuffer_texture_single                   mechazyiu_gbuffer.hlsl TEXTURE SINGLE
 mechazyiu_gbuffer_texture_flip_single              mechazyiu_gbuffer.hlsl TEXTURE FLIP SINGLE
+mechazyiu_alpha_prepass                            mechazyiu_gbuffer.hlsl ALPHA_PREPASS
+mechazyiu_alpha_prepass_texture                    mechazyiu_gbuffer.hlsl ALPHA_PREPASS TEXTURE
 mechazyiu_base                                     mechazyiu_base.hlsl
 mechazyiu_light_point                              mechazyiu_light.hlsl
 mechazyiu_light_spot                               mechazyiu_light.hlsl SPOT
@@ -137,9 +139,21 @@ mechazyiu_light_sun_blend                          mechazyiu_light.hlsl SUN BLEN
 mechazyiu_light_area_blend                         mechazyiu_light.hlsl AREA BLEND
 mechazyiu_shadow                                   mechazyiu_shadow.hlsl
 mechazyiu_shadow_ortho                             mechazyiu_shadow.hlsl ORTHO
+mechazyiu_shadow_alpha                             mechazyiu_shadow.hlsl ALPHA
+mechazyiu_shadow_alpha_texture                     mechazyiu_shadow.hlsl ALPHA TEXTURE
+mechazyiu_shadow_ortho_alpha                       mechazyiu_shadow.hlsl ORTHO ALPHA
+mechazyiu_shadow_ortho_alpha_texture               mechazyiu_shadow.hlsl ORTHO ALPHA TEXTURE
 mechazyiu_shadow_mask_cube                         mechazyiu_shadow_mask.hlsl CUBE
 mechazyiu_shadow_mask_spot                         mechazyiu_shadow_mask.hlsl
 mechazyiu_shadow_mask_sun                          mechazyiu_shadow_mask.hlsl ORTHO
+mechazyiu_forward                                  mechazyiu_forward.hlsl
+mechazyiu_forward_texture                          mechazyiu_forward.hlsl TEXTURE
+mechazyiu_forward_blend                            mechazyiu_forward.hlsl BLEND
+mechazyiu_forward_texture_blend                    mechazyiu_forward.hlsl TEXTURE BLEND
+mechazyiu_forward_light                            mechazyiu_forward.hlsl LIGHT
+mechazyiu_forward_light_texture                    mechazyiu_forward.hlsl LIGHT TEXTURE
+mechazyiu_forward_light_blend                      mechazyiu_forward.hlsl LIGHT BLEND
+mechazyiu_forward_light_texture_blend              mechazyiu_forward.hlsl LIGHT TEXTURE BLEND
 mechazyiu_copy                                     mechazyiu_copy.hlsl
 mechazyiu_output                                   mechazyiu_copy.hlsl OUTPUT
 mechazyiu_mix                                      mechazyiu_copy.hlsl MIX

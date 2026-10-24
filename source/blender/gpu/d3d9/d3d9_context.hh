@@ -155,6 +155,7 @@ class D3D9Context : public Context {
 
   /** Flat shading of the `COLOR` outputs for the next draws (see #D3D9Shader::flat_color). */
   void flat_color_set(bool enable);
+  void alpha_test_set(bool enable);
 
   /**
    * Selection draws (`d3d9-select-output` shaders): the fragments write (select id + 1, depth) to
@@ -183,6 +184,7 @@ class D3D9Context : public Context {
   int point_sprite_ = -1;
   /** Last #D3DRS_SHADEMODE (1 for flat), -1 when unknown. */
   int flat_color_ = -1;
+  int alpha_test_ = -1;
   Map<D3D9VertexDeclKey, IDirect3DVertexDeclaration9 *> vertex_decls_;
 
   /* Selection draws, see #select_draw_begin. */

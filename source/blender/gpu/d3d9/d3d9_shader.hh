@@ -163,6 +163,15 @@ class D3D9Shader : public Shader {
     return flat_color_;
   }
   /**
+   * Fixed function alpha test (`d3d9-alpha-test`): fragments with a first color alpha below 0.5
+   * are discarded. Unlike `clip()` in the shader, it is safe with floating point targets on R300
+   * hardware (pixel kills into them hung it).
+   */
+  bool alpha_test() const
+  {
+    return alpha_test_;
+  }
+  /**
    * Points are drawn as quads of 2 triangles, the vertex shader offsets the corners by the point
    * size (input `TEXCOORD14`, see #D3D9_POINT_CORNER_ATTR): unlike sprites, all the outputs keep
    * their precision. Immediate mode only.
@@ -259,6 +268,7 @@ class D3D9Shader : public Shader {
   Vector<VertexPull> vertex_pulls_;
   bool select_output_ = false;
   bool flat_color_ = false;
+  bool alpha_test_ = false;
   bool point_quads_ = false;
   int resource_id_stride_ = 1;
 

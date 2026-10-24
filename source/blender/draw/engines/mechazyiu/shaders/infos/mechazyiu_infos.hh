@@ -93,6 +93,108 @@ ADDITIONAL_INFO(mechazyiu_gbuffer_single_common)
 DO_STATIC_COMPILATION()
 GPU_SHADER_CREATE_END()
 
+/* Dithered transparency: depth of the covered pixels (alpha tested against noise). */
+GPU_SHADER_CREATE_INFO(mechazyiu_alpha_common)
+/* xy: half the target size in pixels, z: pixel offset of the noise, w: threshold offset (the
+ * sample). The texture's alpha is the coverage when `mat_params.w` is 1. */
+PUSH_CONSTANT(float4, alpha_params)
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_alpha_prepass)
+ADDITIONAL_INFO(mechazyiu_gbuffer_common)
+ADDITIONAL_INFO(mechazyiu_alpha_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_alpha_prepass_texture)
+ADDITIONAL_INFO(mechazyiu_gbuffer_texture_common)
+ADDITIONAL_INFO(mechazyiu_alpha_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+/* Blended transparency: surfaces over the lit sample, then each light added. */
+GPU_SHADER_CREATE_INFO(mechazyiu_forward_common)
+VERTEX_IN(0, float3, pos)
+VERTEX_IN(1, float3, nor)
+VERTEX_SOURCE("mechazyiu_d3d9_vert.glsl")
+FRAGMENT_SOURCE("mechazyiu_d3d9_frag.glsl")
+/* rgb: base color, a: alpha. */
+PUSH_CONSTANT(float4, mat_base)
+/* metallic, Blinn-Phong exponent, dielectric F0, 1 when the texture's alpha is the coverage. */
+PUSH_CONSTANT(float4, mat_params)
+/* x: 1 for perspective projections, zw: part of the tile buffers used. */
+PUSH_CONSTANT(float4, proj_type)
+/* The sample under the surface (when not blended by the hardware). */
+SAMPLER(1, sampler2D, sample_tx)
+FRAGMENT_OUT(0, float4, out_color)
+ADDITIONAL_INFO(draw_view)
+ADDITIONAL_INFO(draw_modelmat)
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_forward_base)
+PUSH_CONSTANT_ARRAY(float4, world_sh, 4)
+/* rgb: emission. */
+PUSH_CONSTANT(float4, emission)
+ADDITIONAL_INFO(mechazyiu_forward_common)
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_forward_light_common)
+PUSH_CONSTANT(float4, light_position)
+PUSH_CONSTANT(float4, light_direction)
+PUSH_CONSTANT(float4, light_color)
+PUSH_CONSTANT(float4, light_spot)
+ADDITIONAL_INFO(mechazyiu_forward_common)
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_forward_texture_common)
+VERTEX_IN(2, float2, au)
+SAMPLER(0, sampler2D, base_tx)
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_forward)
+ADDITIONAL_INFO(mechazyiu_forward_base)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_forward_blend)
+ADDITIONAL_INFO(mechazyiu_forward_base)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_forward_texture)
+ADDITIONAL_INFO(mechazyiu_forward_base)
+ADDITIONAL_INFO(mechazyiu_forward_texture_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_forward_texture_blend)
+ADDITIONAL_INFO(mechazyiu_forward_base)
+ADDITIONAL_INFO(mechazyiu_forward_texture_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_forward_light)
+ADDITIONAL_INFO(mechazyiu_forward_light_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_forward_light_blend)
+ADDITIONAL_INFO(mechazyiu_forward_light_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_forward_light_texture)
+ADDITIONAL_INFO(mechazyiu_forward_light_common)
+ADDITIONAL_INFO(mechazyiu_forward_texture_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_forward_light_texture_blend)
+ADDITIONAL_INFO(mechazyiu_forward_light_common)
+ADDITIONAL_INFO(mechazyiu_forward_texture_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
 /* Passes over a rectangle of the tile, reading the G-buffer. */
 GPU_SHADER_CREATE_INFO(mechazyiu_screen_common)
 VERTEX_SOURCE("mechazyiu_d3d9_vert.glsl")
@@ -208,6 +310,40 @@ GPU_SHADER_CREATE_END()
 
 GPU_SHADER_CREATE_INFO(mechazyiu_shadow_ortho)
 ADDITIONAL_INFO(mechazyiu_shadow_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+/* Dithered transparent casters. */
+GPU_SHADER_CREATE_INFO(mechazyiu_shadow_alpha_common)
+PUSH_CONSTANT(float4, mat_base)
+PUSH_CONSTANT(float4, mat_params)
+ADDITIONAL_INFO(mechazyiu_alpha_common)
+ADDITIONAL_INFO(mechazyiu_shadow_common)
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_shadow_alpha_texture_common)
+VERTEX_IN(2, float2, au)
+SAMPLER(0, sampler2D, base_tx)
+ADDITIONAL_INFO(mechazyiu_shadow_alpha_common)
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_shadow_alpha)
+ADDITIONAL_INFO(mechazyiu_shadow_alpha_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_shadow_alpha_texture)
+ADDITIONAL_INFO(mechazyiu_shadow_alpha_texture_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_shadow_ortho_alpha)
+ADDITIONAL_INFO(mechazyiu_shadow_alpha_common)
+DO_STATIC_COMPILATION()
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(mechazyiu_shadow_ortho_alpha_texture)
+ADDITIONAL_INFO(mechazyiu_shadow_alpha_texture_common)
 DO_STATIC_COMPILATION()
 GPU_SHADER_CREATE_END()
 

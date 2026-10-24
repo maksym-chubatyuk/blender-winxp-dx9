@@ -54,7 +54,17 @@ struct MaterialData {
   /** Image multiplying the base color (the image texture linked to it). */
   gpu::Texture **texture = nullptr;
   GPUSamplerState sampler = GPUSamplerState::default_sampler();
+  /** The alpha of the image multiplies `alpha` (the image's alpha output is linked to it). */
+  bool texture_alpha = false;
   bool backface_culling = false;
+  /** Material render method: blended (sorted, drawn over the lit image), else dithered. */
+  bool blended = false;
+
+  /** Dithered materials with partial coverage: alpha tested against noise each sample. */
+  bool dithered() const
+  {
+    return !blended && (alpha < 1.0f || texture_alpha);
+  }
 };
 
 MaterialData material_data_get(const Material *material);

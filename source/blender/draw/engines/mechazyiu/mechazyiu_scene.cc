@@ -159,6 +159,35 @@ static void base_color_read(MaterialData &data, const bNode &node, StringRef ide
   }
 }
 
+/**
+ * Alpha input: its value, or the alpha of an image linked to it. One image per material: the
+ * base color's, or an image used only for the alpha.
+ */
+static void alpha_read(MaterialData &data, const bNode &node, StringRef identifier)
+{
+  const bNodeSocket *socket = input_find(node, identifier);
+  data.alpha = input_float(node, identifier, 1.0f);
+  const bNodeSocket *from = input_link_get(socket);
+  if (from == nullptr) {
+    return;
+  }
+  const bNode &from_node = from->owner_node();
+  if (from_node.type_legacy != SH_NODE_TEX_IMAGE || StringRef(from->identifier) != "Alpha") {
+    return;
+  }
+  MaterialData alpha_image;
+  material_texture_set(alpha_image, from_node);
+  if (data.texture == nullptr) {
+    /* The image only gives the alpha: its color must not tint the base color. That needs a
+     * second image, not supported. */
+    return;
+  }
+  if (alpha_image.texture == data.texture) {
+    data.texture_alpha = true;
+    data.alpha = 1.0f;
+  }
+}
+
 /** Read the BSDF of a shader socket (output socket of a shader node). */
 static MaterialData shader_read(const bNodeSocket *shader, int depth)
 {
@@ -175,7 +204,7 @@ static MaterialData shader_read(const bNodeSocket *shader, int depth)
       const float ior = input_float(node, "IOR", 1.5f);
       const float level = input_float(node, "Specular IOR Level", 0.5f);
       data.f0 = math::square((ior - 1.0f) / (ior + 1.0f)) * 2.0f * level;
-      data.alpha = input_float(node, "Alpha", 1.0f);
+      alpha_read(data, node, "Alpha");
       data.emission = input_color(node, "Emission Color", float3(0.0f)) *
                       input_float(node, "Emission Strength", 0.0f);
       break;
@@ -190,6 +219,11 @@ static MaterialData shader_read(const bNodeSocket *shader, int depth)
       base_color_read(data, node, node.type_legacy == SH_NODE_BSDF_GLOSSY ? "Color" : "Base Color");
       data.metallic = 1.0f;
       data.roughness = input_float(node, "Roughness", 0.5f);
+      break;
+    case SH_NODE_BSDF_TRANSPARENT:
+      data.base_color = float3(0.0f);
+      data.f0 = 0.0f;
+      data.alpha = 0.0f;
       break;
     case SH_NODE_EMISSION:
       data.base_color = float3(0.0f);
@@ -208,6 +242,26 @@ static MaterialData shader_read(const bNodeSocket *shader, int depth)
       }
       if (shaders.size() != 2) {
         break;
+      }
+      /* Transparency mixed with a surface: the factor is its coverage. */
+      for (const int k : IndexRange(2)) {
+        const bNodeSocket *other = shaders[1 - k];
+        if (node.type_legacy != SH_NODE_MIX_SHADER || shaders[k] == nullptr || other == nullptr ||
+            shaders[k]->owner_node().type_legacy != SH_NODE_BSDF_TRANSPARENT)
+        {
+          continue;
+        }
+        data = shader_read(other, depth + 1);
+        if (k == 0) {
+          MaterialData coverage = data;
+          alpha_read(coverage, node, "Fac");
+          data.texture_alpha = coverage.texture_alpha;
+          data.alpha *= coverage.alpha;
+        }
+        else {
+          data.alpha *= 1.0f - math::clamp(input_float(node, "Fac", 0.5f), 0.0f, 1.0f);
+        }
+        return data;
       }
       const MaterialData a = shader_read(shaders[0], depth + 1);
       const MaterialData b = shader_read(shaders[1], depth + 1);
@@ -250,6 +304,7 @@ MaterialData material_data_get(const Material *material)
     return data;
   }
   data.backface_culling = (material->blend_flag & MA_BL_CULL_BACKFACE) != 0;
+  const bool blended = material->surface_render_method == MA_SURFACE_METHOD_FORWARD;
   bNodeTree *ntree = material->nodetree;
   const bNode *output = ntree ? ntreeShaderOutputNode(ntree, SHD_OUTPUT_EEVEE) : nullptr;
   if (output == nullptr) {
@@ -263,6 +318,7 @@ MaterialData material_data_get(const Material *material)
   const bool backface_culling = data.backface_culling;
   data = shader_read(input_link_get(input_find(*output, "Surface")), 0);
   data.backface_culling = backface_culling;
+  data.blended = blended;
   return data;
 }
 

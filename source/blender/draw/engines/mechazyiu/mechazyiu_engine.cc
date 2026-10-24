@@ -87,7 +87,7 @@ constexpr int material_table_len = 256;
  * floats), the shadow mask, the mean of the samples (final renders). */
 constexpr int64_t tile_bytes_per_pixel = 4 * 4 + 4 + 2 * 8 + 4 + 8;
 /** Shadow map atlas: 4 x 2 cells of 512 (the faces of point and area lights), or the left half
- * (spots and suns). Single precision distances and their depth buffer. */
+ * (spots and suns). Distances in 24 bits of 8 bit colors, and their depth buffer. */
 constexpr int shadow_atlas_width = 2048;
 constexpr int shadow_atlas_height = 1024;
 constexpr int shadow_cube_size = 512;
@@ -118,6 +118,16 @@ class ShaderCache {
        {"mechazyiu_light_area_blend"}}};
   gpu::StaticShader mix = {"mechazyiu_mix"};
   gpu::StaticShader shadow[2 /*ortho*/] = {{"mechazyiu_shadow"}, {"mechazyiu_shadow_ortho"}};
+  gpu::StaticShader shadow_alpha[2 /*ortho*/][2 /*texture*/] = {
+      {{"mechazyiu_shadow_alpha"}, {"mechazyiu_shadow_alpha_texture"}},
+      {{"mechazyiu_shadow_ortho_alpha"}, {"mechazyiu_shadow_ortho_alpha_texture"}}};
+  gpu::StaticShader alpha_prepass[2 /*texture*/] = {{"mechazyiu_alpha_prepass"},
+                                                    {"mechazyiu_alpha_prepass_texture"}};
+  gpu::StaticShader forward[2 /*light*/][2 /*texture*/][2 /*blend*/] = {
+      {{{"mechazyiu_forward"}, {"mechazyiu_forward_blend"}},
+       {{"mechazyiu_forward_texture"}, {"mechazyiu_forward_texture_blend"}}},
+      {{{"mechazyiu_forward_light"}, {"mechazyiu_forward_light_blend"}},
+       {{"mechazyiu_forward_light_texture"}, {"mechazyiu_forward_light_texture_blend"}}}};
   gpu::StaticShader shadow_mask[3] = {
       {"mechazyiu_shadow_mask_cube"}, {"mechazyiu_shadow_mask_spot"}, {"mechazyiu_shadow_mask_sun"}};
   gpu::StaticShader copy = {"mechazyiu_copy"};
@@ -233,6 +243,20 @@ static float blackman_harris(float x)
                        0.01168f * math::cos(3.0f * t));
 }
 
+/**
+ * A surface with a blended material: drawn after the lights, back to front, over the sample.
+ * One pass per side (back faces first) for the world light and emission, and one for the lights.
+ */
+struct BlendedDraw {
+  PassMain base_ps[2] = {{"mechazyiu.blended"}, {"mechazyiu.blended_back"}};
+  PassMain light_ps[2] = {{"mechazyiu.blended_light"}, {"mechazyiu.blended_light_back"}};
+  bool double_sided = false;
+  float3 bounds_min = float3(0.0f);
+  float3 bounds_max = float3(0.0f);
+  /** View space depth of the bounds' center, for the order. */
+  float depth = 0.0f;
+};
+
 /** What the GPU can do, chosen paths. */
 struct Capabilities {
   /** Floating point render targets (16 and 32 bit): required. */
@@ -304,6 +328,12 @@ class Instance : public DrawEngine {
   PassSimple output_ps_ = {"mechazyiu.output"};
   /** Shadow casters, perspective and orthographic. */
   PassMain shadow_ps_[2] = {{"mechazyiu.shadow"}, {"mechazyiu.shadow_ortho"}};
+  /** Depth of the dithered transparent surfaces, before the G-buffer. */
+  PassMain alpha_prepass_ps_ = {"mechazyiu.alpha_prepass"};
+  Map<int3, PassMain::Sub *> alpha_prepass_subs_;
+  /** Dithered casters of the shadow passes, by material: [index][ortho][textured]. */
+  Map<int3, PassMain::Sub *> shadow_alpha_subs_;
+  Vector<std::unique_ptr<BlendedDraw>> blended_;
   /** Shadow masks of cube, spot and sun shadow maps. */
   PassSimple shadow_mask_ps_[3] = {{"mechazyiu.shadow_mask_cube"},
                                     {"mechazyiu.shadow_mask_spot"},
@@ -328,6 +358,10 @@ class Instance : public DrawEngine {
                                        {"mechazyiu.gbuffer3"}};
   /** Final renders: the mean of the tile's samples. */
   Texture tile_mean_tx_ = {"mechazyiu.tile_mean"};
+  /** Dithered prepass: the depth, and a target for the alpha test (the shadow mask buffer). */
+  Framebuffer alpha_prepass_fb_ = {"mechazyiu.alpha_prepass"};
+  /** Blended surfaces over the sample, depth tested against the G-buffer. */
+  Framebuffer forward_fb_[2] = {{"mechazyiu.forward0"}, {"mechazyiu.forward1"}};
   Framebuffer tile_mean_fb_ = {"mechazyiu.tile_mean"};
   Framebuffer accum_fb_[2] = {{"mechazyiu.accum0"}, {"mechazyiu.accum1"}};
   Texture shadow_mask_tx_ = {"mechazyiu.shadow_mask"};
@@ -361,6 +395,15 @@ class Instance : public DrawEngine {
   float4 world_sh_[4] = {};
   float4 background_ = float4(0.0f);
   float4 gbuffer_target_ = float4(1.0f, 0.0f, 0.0f, 0.0f);
+  float4 alpha_params_ = float4(0.0f);
+  float4 shadow_alpha_params_ = float4(0.0f);
+  gpu::Texture *forward_src_ = nullptr;
+  float4 forward_light_position_ = float4(0.0f);
+  float4 forward_light_direction_ = float4(0.0f);
+  float4 forward_light_color_ = float4(0.0f);
+  float4 forward_light_spot_ = float4(0.0f);
+  /** Position of each light for the sample (or direction toward suns), world space. */
+  Vector<float3> light_sample_positions_;
   float4 mix_weight_ = float4(1.0f);
   gpu::Texture *mean_src_ = nullptr;
   float4 light_position_ = float4(0.0f);
@@ -427,6 +470,12 @@ class Instance : public DrawEngine {
     gbuffer_ps_.init();
     gbuffer_ps_.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_DEPTH |
                           DRW_STATE_DEPTH_LESS_EQUAL);
+    alpha_prepass_ps_.init();
+    alpha_prepass_ps_.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_DEPTH |
+                                DRW_STATE_DEPTH_LESS_EQUAL);
+    alpha_prepass_subs_.clear();
+    shadow_alpha_subs_.clear();
+    blended_.clear();
 
     ShaderCache &shaders = ShaderCache::get();
     auto screen_pass = [&](PassSimple &ps, gpu::Shader *shader) {
@@ -481,7 +530,8 @@ class Instance : public DrawEngine {
       screen_pass(ps, shaders.shadow_mask[kind].get());
       ps.bind_texture("gb_normal_tx", &gb_normal_tx_);
       ps.bind_texture("gb_depth_tx", &gb_depth_tx_);
-      ps.bind_texture("shadow_tx", &shadow_tx_);
+      /* Packed distances: never filtered. */
+      ps.bind_texture("shadow_tx", &shadow_tx_, GPUSamplerState::default_sampler());
       ps.push_constant("light_position", &shadow_light_view_);
       ps.push_constant("shadow_mat", shadow_mat_, 4);
       ps.push_constant("shadow_params", &shadow_params_);
@@ -531,7 +581,10 @@ class Instance : public DrawEngine {
     return *material_passes_.lookup_or_add_cb(int3(index, textured, back), [&]() {
       const MaterialData &data = materials_[index];
       PassMain::Sub &sub = gbuffer_ps_.sub("mechazyiu.material");
-      sub.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_DEPTH | DRW_STATE_DEPTH_LESS_EQUAL |
+      /* Dithered surfaces: only the pixels their prepass kept. */
+      const DRWState depth_test = data.dithered() ? DRW_STATE_DEPTH_EQUAL :
+                                                    DRW_STATE_DEPTH_LESS_EQUAL;
+      sub.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_DEPTH | depth_test |
                     (back ? DRW_STATE_CULL_FRONT : DRW_STATE_CULL_BACK));
       const bool single = !caps_.multiple_targets;
       sub.shader_set(ShaderCache::get().gbuffer[textured][back][single].get());
@@ -548,6 +601,108 @@ class Instance : public DrawEngine {
       }
       return &sub;
     });
+  }
+
+  /** Coverage of the material, alpha tested: [textured][culled back faces]. */
+  PassMain::Sub &alpha_prepass_get(int index, bool textured)
+  {
+    const MaterialData &data = materials_[index];
+    return *alpha_prepass_subs_.lookup_or_add_cb(int3(index, textured, 0), [&]() {
+      PassMain::Sub &sub = alpha_prepass_ps_.sub("mechazyiu.alpha_prepass");
+      sub.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_DEPTH | DRW_STATE_DEPTH_LESS_EQUAL |
+                    (data.backface_culling ? DRW_STATE_CULL_BACK : DRWState(0)));
+      sub.shader_set(ShaderCache::get().alpha_prepass[textured].get());
+      sub.push_constant("mat_base", float4(data.base_color, data.alpha));
+      sub.push_constant("mat_params", float4(0.0f, 0.0f, 0.0f, data.texture_alpha ? 1.0f : 0.0f));
+      sub.push_constant("alpha_params", &alpha_params_);
+      if (textured) {
+        sub.bind_texture("base_tx", data.texture, data.sampler);
+      }
+      return &sub;
+    });
+  }
+
+  /** Shadow casters with partial coverage (dithered and blended materials). */
+  PassMain::Sub &shadow_alpha_get(int index, bool ortho, bool textured)
+  {
+    const MaterialData &data = materials_[index];
+    return *shadow_alpha_subs_.lookup_or_add_cb(int3(index, ortho, textured), [&]() {
+      PassMain::Sub &sub = shadow_ps_[ortho].sub("mechazyiu.shadow_alpha");
+      sub.shader_set(ShaderCache::get().shadow_alpha[ortho][textured].get());
+      sub.push_constant("shadow_light", &shadow_light_);
+      sub.push_constant("mat_base", float4(data.base_color, data.alpha));
+      sub.push_constant("mat_params", float4(0.0f, 0.0f, 0.0f, data.texture_alpha ? 1.0f : 0.0f));
+      sub.push_constant("alpha_params", &shadow_alpha_params_);
+      if (textured) {
+        sub.bind_texture("base_tx", data.texture, data.sampler);
+      }
+      return &sub;
+    });
+  }
+
+  /** Passes of a surface with a blended material, see #BlendedDraw. */
+  void blended_sync(const MaterialData &data,
+                    bool textured,
+                    gpu::Batch *batch,
+                    ResourceHandleRange handle,
+                    const Object &ob)
+  {
+    std::unique_ptr<BlendedDraw> draw = std::make_unique<BlendedDraw>();
+    draw->double_sided = !data.backface_culling;
+    const std::optional<Bounds<float3>> bounds = BKE_object_boundbox_get(&ob);
+    draw->bounds_min = float3(FLT_MAX);
+    draw->bounds_max = float3(-FLT_MAX);
+    for (int corner = 0; corner < 8 && bounds; corner++) {
+      const float3 local((corner & 1) ? bounds->max.x : bounds->min.x,
+                         (corner & 2) ? bounds->max.y : bounds->min.y,
+                         (corner & 4) ? bounds->max.z : bounds->min.z);
+      const float3 world = math::transform_point(ob.object_to_world(), local);
+      draw->bounds_min = math::min(draw->bounds_min, world);
+      draw->bounds_max = math::max(draw->bounds_max, world);
+    }
+    if (!bounds) {
+      draw->bounds_min = draw->bounds_max = ob.object_to_world().location();
+    }
+    /* Blinn-Phong exponent matching the roughness. */
+    const float a = math::square(math::clamp(data.roughness, 0.045f, 1.0f));
+    const float exponent = math::clamp(2.0f / (a * a) - 2.0f, 1.0f, 2048.0f);
+    const float4 mat_params(data.metallic, exponent, data.f0, data.texture_alpha ? 1.0f : 0.0f);
+    const bool hw_blend = caps_.float_blending;
+    ShaderCache &shaders = ShaderCache::get();
+    for (int back = 0; back < 2; back++) {
+      const DRWState cull = back ? DRW_STATE_CULL_FRONT : DRW_STATE_CULL_BACK;
+      for (int light = 0; light < 2; light++) {
+        PassMain &ps = light ? draw->light_ps[back] : draw->base_ps[back];
+        ps.init();
+        DRWState state = DRW_STATE_WRITE_COLOR | DRW_STATE_DEPTH_LESS_EQUAL | cull;
+        if (hw_blend) {
+          state |= light ? DRW_STATE_BLEND_ADD_FULL : DRW_STATE_BLEND_ALPHA_PREMUL;
+        }
+        ps.state_set(state);
+        ps.shader_set(shaders.forward[light][textured][hw_blend].get());
+        ps.push_constant("mat_base", float4(data.base_color, data.alpha));
+        ps.push_constant("mat_params", mat_params);
+        ps.push_constant("proj_type", &proj_type_);
+        if (!hw_blend) {
+          ps.bind_texture("sample_tx", &forward_src_);
+        }
+        if (textured) {
+          ps.bind_texture("base_tx", data.texture, data.sampler);
+        }
+        if (light) {
+          ps.push_constant("light_position", &forward_light_position_);
+          ps.push_constant("light_direction", &forward_light_direction_);
+          ps.push_constant("light_color", &forward_light_color_);
+          ps.push_constant("light_spot", &forward_light_spot_);
+        }
+        else {
+          ps.push_constant("world_sh", world_sh_, 4);
+          ps.push_constant("emission", float4(data.emission, 0.0f));
+        }
+        ps.draw(batch, handle);
+      }
+    }
+    blended_.append(std::move(draw));
   }
 
   void object_sync(ObjectRef &ob_ref, Manager &manager) final
@@ -611,13 +766,27 @@ class Instance : public DrawEngine {
       const int index = material_index_get(material);
       const MaterialData &data = materials_[index];
       const bool textured = has_uv && data.texture && *data.texture;
+      const bool partial = data.blended || data.dithered();
+      if (casts_shadow) {
+        for (int ortho = 0; ortho < 2; ortho++) {
+          if (partial) {
+            shadow_alpha_get(index, ortho, textured).draw(batches[i], handle);
+          }
+          else {
+            shadow_ps_[ortho].draw(batches[i], handle);
+          }
+        }
+      }
+      if (data.blended) {
+        blended_sync(data, textured, batches[i], handle, *ob);
+        continue;
+      }
+      if (data.dithered()) {
+        alpha_prepass_get(index, textured).draw(batches[i], handle);
+      }
       material_pass_get(index, textured, false).draw(batches[i], handle);
       if (!data.backface_culling) {
         material_pass_get(index, textured, true).draw(batches[i], handle);
-      }
-      if (casts_shadow) {
-        shadow_ps_[0].draw(batches[i], handle);
-        shadow_ps_[1].draw(batches[i], handle);
       }
     }
   }
@@ -729,7 +898,7 @@ class Instance : public DrawEngine {
     shadow_mask_tx_.ensure_2d(gpu::TextureFormat::UNORM_8_8_8_8, size, usage);
     shadow_mask_fb_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(shadow_mask_tx_));
     const int2 atlas_size(shadow_atlas_width, shadow_atlas_height);
-    shadow_tx_.ensure_2d(gpu::TextureFormat::SFLOAT_32, atlas_size, usage);
+    shadow_tx_.ensure_2d(gpu::TextureFormat::UNORM_8_8_8_8, atlas_size, usage);
     shadow_depth_tx_.ensure_2d(gpu::TextureFormat::SFLOAT_32_DEPTH_UINT_8, atlas_size, usage);
     shadow_fb_.ensure(GPU_ATTACHMENT_TEXTURE(shadow_depth_tx_), GPU_ATTACHMENT_TEXTURE(shadow_tx_));
     depth_tx_.ensure_2d(gpu::TextureFormat::SFLOAT_32_DEPTH_UINT_8, size, usage);
@@ -739,6 +908,12 @@ class Instance : public DrawEngine {
     }
     tile_mean_tx_.ensure_2d(gpu::TextureFormat::SFLOAT_16_16_16_16, size, usage);
     tile_mean_fb_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(tile_mean_tx_));
+    alpha_prepass_fb_.ensure(GPU_ATTACHMENT_TEXTURE(depth_tx_),
+                             GPU_ATTACHMENT_TEXTURE(shadow_mask_tx_));
+    for (int i = 0; i < 2; i++) {
+      forward_fb_[i].ensure(GPU_ATTACHMENT_TEXTURE(depth_tx_),
+                            GPU_ATTACHMENT_TEXTURE(accum_tx_[i]));
+    }
     if (caps_.multiple_targets) {
       gbuffer_fb_.ensure(GPU_ATTACHMENT_TEXTURE(depth_tx_),
                          GPU_ATTACHMENT_TEXTURE(gb_diffuse_tx_),
@@ -886,13 +1061,19 @@ class Instance : public DrawEngine {
      * passes sample it with scaled texture coordinates. */
     const float2 used = float2(tile.z, tile.w) / float2(tile_allocated_);
     proj_type_ = float4(proj_type_.x, 0.0f, used.x, used.y);
+    /* Depth of the dithered surfaces where they cover the pixel this sample. */
+    GPU_framebuffer_bind(alpha_prepass_fb_);
+    GPU_framebuffer_viewport_set(alpha_prepass_fb_, 0, 0, tile.z, tile.w);
+    GPU_framebuffer_clear_depth_stencil(alpha_prepass_fb_, 1.0f, 0x00);
+    alpha_params_ = coverage_params(float2(tile.z, tile.w) * 0.5f, sample, 0);
+    manager.submit(alpha_prepass_ps_, view_);
+
     if (caps_.multiple_targets) {
       GPU_framebuffer_bind(gbuffer_fb_);
       GPU_framebuffer_viewport_set(gbuffer_fb_, 0, 0, tile.z, tile.w);
       const std::array<double4, 4> clear = {
           double4(0.0), double4(0.0), double4(0.0), double4(0.0)};
       GPU_framebuffer_multi_clear(gbuffer_fb_, clear);
-      GPU_framebuffer_clear_depth_stencil(gbuffer_fb_, 1.0f, 0x00);
       manager.submit(gbuffer_ps_, view_);
     }
     else {
@@ -902,9 +1083,6 @@ class Instance : public DrawEngine {
         GPU_framebuffer_bind(fb);
         GPU_framebuffer_viewport_set(fb, 0, 0, tile.z, tile.w);
         fb.clear_color(float4(0.0f));
-        if (i == 0) {
-          GPU_framebuffer_clear_depth_stencil(fb, 1.0f, 0x00);
-        }
         gbuffer_target_ = float4(i == 0, i == 1, i == 2, i == 3);
         manager.submit(gbuffer_ps_, view_);
       }
@@ -934,6 +1112,7 @@ class Instance : public DrawEngine {
 
     /* Lights. */
     const float3x3 view_rotation = float3x3(viewmat);
+    light_sample_positions_.resize(lights_.size());
     for (const int i : lights_.index_range()) {
       const LightData &light = lights_[i];
       /* Points of the light's shape, a different sequence for each light. */
@@ -945,6 +1124,7 @@ class Instance : public DrawEngine {
       const float3 world_pos = (sample > 0 || light.type == LightType::SUN) ?
                                    light_sample_position(light, rand) :
                                    light.object_to_world.location();
+      light_sample_positions_[i] = world_pos;
       float4 rect;
       if (light.type == LightType::SUN) {
         light_position_ = float4(math::normalize(view_rotation * world_pos), 0.0f);
@@ -988,6 +1168,8 @@ class Instance : public DrawEngine {
       manager.submit(copy_ps_);
     }
 
+    blended_render(manager, viewmat, winmat_tile, tile);
+
     /* Mix the sample into the mean (in the other buffer), then keep it. */
     rect_ = float4(-1.0f, -1.0f, 1.0f, 1.0f);
     copy_src_ = accum_tx_[cur_];
@@ -1026,6 +1208,133 @@ class Instance : public DrawEngine {
   }
 
   /**
+   * Noise of the dithered transparency for a sample (see `mechazyiu_coverage`): the pattern moves
+   * by a random pixel offset and the threshold by the golden ratio sequence (`stream` decorrelates
+   * the screen and the shadow maps).
+   */
+  static float4 coverage_params(float2 half_size, int sample, int stream)
+  {
+    const float threshold = math::fract(float(sample) * 0.618034f + float(stream) * 0.5f);
+    /* Small offsets: the noise loses its precision on large coordinates (24 bit floats). */
+    const float offset = float(int(halton(sample + 1, 7 + 4 * stream) * 64.0f));
+    return float4(half_size, offset, threshold);
+  }
+
+  /** Normalized device rectangle of world space bounds, false when off the tile. */
+  static bool bounds_rect_get(const float3 &bounds_min,
+                              const float3 &bounds_max,
+                              const float4x4 &viewmat,
+                              const float4x4 &winmat,
+                              float4 &r_rect)
+  {
+    r_rect = float4(-1.0f, -1.0f, 1.0f, 1.0f);
+    float2 lo(FLT_MAX), hi(-FLT_MAX);
+    for (int i = 0; i < 8; i++) {
+      const float3 corner((i & 1) ? bounds_max.x : bounds_min.x,
+                          (i & 2) ? bounds_max.y : bounds_min.y,
+                          (i & 4) ? bounds_max.z : bounds_min.z);
+      const float4 clip = winmat * (viewmat * float4(corner, 1.0f));
+      if (clip.w <= 1e-6f) {
+        /* Around or behind the camera. */
+        return true;
+      }
+      lo = math::min(lo, float2(clip) / clip.w);
+      hi = math::max(hi, float2(clip) / clip.w);
+    }
+    lo = math::max(lo, float2(-1.0f));
+    hi = math::min(hi, float2(1.0f));
+    if (lo.x >= hi.x || lo.y >= hi.y) {
+      return false;
+    }
+    r_rect = float4(lo.x, lo.y, hi.x, hi.y);
+    return true;
+  }
+
+  /**
+   * Blended surfaces, back to front: each pass draws over the sample. Without floating point
+   * blending the pass reads the sample and writes the other buffer (first given the sample's
+   * rectangle), which then holds it.
+   */
+  void blended_render(Manager &manager,
+                      const float4x4 &viewmat,
+                      const float4x4 &winmat_tile,
+                      int4 tile)
+  {
+    if (blended_.is_empty()) {
+      return;
+    }
+    const float3x3 view_rotation = float3x3(viewmat);
+    Vector<BlendedDraw *> order;
+    for (std::unique_ptr<BlendedDraw> &draw : blended_) {
+      draw->depth = math::transform_point(viewmat,
+                                          (draw->bounds_min + draw->bounds_max) * 0.5f).z;
+      order.append(draw.get());
+    }
+    std::sort(order.begin(), order.end(), [](const BlendedDraw *a, const BlendedDraw *b) {
+      return a->depth < b->depth;
+    });
+
+    auto pass = [&](PassMain &ps, const float4 &rect) {
+      Framebuffer &target = forward_fb_[caps_.float_blending ? cur_ : 1 - cur_];
+      if (!caps_.float_blending) {
+        rect_ = rect;
+        copy_src_ = accum_tx_[cur_];
+        uv_transform_ = float4(1.0f, 1.0f, 0.0f, 0.0f);
+        GPU_framebuffer_bind(accum_fb_[1 - cur_]);
+        GPU_framebuffer_viewport_set(accum_fb_[1 - cur_], 0, 0, tile.z, tile.w);
+        manager.submit(copy_ps_);
+        forward_src_ = accum_tx_[cur_];
+      }
+      GPU_framebuffer_bind(target);
+      GPU_framebuffer_viewport_set(target, 0, 0, tile.z, tile.w);
+      manager.submit(ps, view_);
+      if (!caps_.float_blending) {
+        cur_ = 1 - cur_;
+      }
+    };
+
+    for (BlendedDraw *draw : order) {
+      float4 rect;
+      if (!bounds_rect_get(draw->bounds_min, draw->bounds_max, viewmat, winmat_tile, rect)) {
+        continue;
+      }
+      for (int side = draw->double_sided ? 1 : 0; side >= 0; side--) {
+        pass(draw->base_ps[side], rect);
+        for (const int i : lights_.index_range()) {
+          const LightData &light = lights_[i];
+          const float3 &pos = light_sample_positions_[i];
+          if (light.type != LightType::SUN) {
+            const float3 nearest = math::clamp(pos, draw->bounds_min, draw->bounds_max);
+            if (math::distance(nearest, pos) > light.influence_radius) {
+              continue;
+            }
+          }
+          const bool sun = light.type == LightType::SUN;
+          forward_light_position_ = sun ?
+                                        float4(math::normalize(view_rotation * pos), 0.0f) :
+                                        float4(math::transform_point(viewmat, pos), 1.0f);
+          const float3 forward = -math::normalize(view_rotation *
+                                                  light.object_to_world.z_axis());
+          forward_light_direction_ = float4(
+              forward, sun ? 0.0f : 1.0f / math::square(light.influence_radius));
+          forward_light_color_ = float4(light.intensity * float(M_1_PI),
+                                        light.specular_factor * 0.25f);
+          const float smooth = math::max(light.spot_smooth, 1e-4f);
+          forward_light_spot_ = light.type == LightType::SPOT ?
+                                    float4(1.0f / smooth,
+                                           -light.spot_cos_half / smooth,
+                                           1.0f,
+                                           light.diffuse_factor) :
+                                light.type == LightType::AREA ?
+                                    float4(1.0f, 0.0f, 0.0f, light.diffuse_factor) :
+                                    float4(0.0f, 1.0f, 0.0f, light.diffuse_factor);
+          pass(draw->light_ps[side], rect);
+        }
+      }
+    }
+  }
+
+  /**
    * Render the shadow map of a light at a point of its shape, and set the parameters of its
    * shadow mask pass. False when nothing casts shadows.
    */
@@ -1049,6 +1358,11 @@ class Instance : public DrawEngine {
                               float2(0.0f);
     const float2 atlas_texel = 1.0f / float2(shadow_atlas_width, shadow_atlas_height);
     shadow_params_ = float4(jitter * atlas_texel * 2.0f, 0.0f, 0.0f);
+    /* Coverage noise of the dithered casters, in texels of the face. */
+    const float face_size = light.type == LightType::SUN || light.type == LightType::SPOT ?
+                                float(shadow_atlas_height) :
+                                float(shadow_cube_size);
+    shadow_alpha_params_ = coverage_params(float2(face_size * 0.5f), sample, 1);
 
     auto face_view = [](const float3 &right, const float3 &up, const float3 &forward,
                         const float3 &origin) {

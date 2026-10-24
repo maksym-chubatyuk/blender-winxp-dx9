@@ -610,6 +610,7 @@ void D3D9Context::state_invalidate()
   state_manager->force_state();
   point_sprite_ = -1;
   flat_color_ = -1;
+  alpha_test_ = -1;
   if (shader) {
     shader->bind(nullptr);
   }
@@ -762,6 +763,18 @@ void D3D9Context::flat_color_set(bool enable)
   if (flat_color_ != int(enable)) {
     device->SetRenderState(D3DRS_SHADEMODE, enable ? D3DSHADE_FLAT : D3DSHADE_GOURAUD);
     flat_color_ = int(enable);
+  }
+}
+
+void D3D9Context::alpha_test_set(bool enable)
+{
+  if (alpha_test_ != int(enable)) {
+    device->SetRenderState(D3DRS_ALPHATESTENABLE, enable ? TRUE : FALSE);
+    if (enable) {
+      device->SetRenderState(D3DRS_ALPHAREF, 0x80);
+      device->SetRenderState(D3DRS_ALPHAFUNC, D3DCMP_GREATEREQUAL);
+    }
+    alpha_test_ = int(enable);
   }
 }
 

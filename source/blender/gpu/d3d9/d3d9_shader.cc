@@ -480,6 +480,10 @@ void D3D9Shader::parse_instance_data(const D3D9ShaderBinary &binary)
       flat_color_ = true;
       continue;
     }
+    if (STREQ(key, "alpha-test")) {
+      alpha_test_ = true;
+      continue;
+    }
     if (STREQ(key, "select-output")) {
       select_output_ = true;
       continue;
